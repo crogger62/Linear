@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Linear Alerts</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    /* --- simple responsive layout and styling --- */
+    :root { color-scheme: light dark; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 16px;
+      background: var(--bg, #fafafa);
+    }
+    h1 { margin: 0 0 12px 0; font-size: 1.25rem; }
+    #status { font-size: .9rem; opacity: .7; margin-bottom: 12px; }
+    .msg {
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .hdr {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .badge {
+      font-size: .75rem;
+      padding: 2px 6px;
+      border-radius: 999px;
+      border: 1px solid #bbb;
+      background: #eee;
+    }
+    .ts {
+      margin-left: auto;
+      font-size: .8rem;
+      opacity: .7;
+    }
+    pre {
+      margin: 8px 0 0;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Linear Alerts</h1>
+  <div id="status">connecting…</div>
+  <div id="feed"></div>
+
+  <script>
+    // Reference to the status line and message feed container
+    const statusEl = document.getElementById("status");
+    const feed = document.getElementById("feed");
+
+    // --- 1) Open a persistent Server-Sent Events connection to /events ---
+    const ev = new EventSource("/events");
+
+    // Connection lifecycle handlers
+    ev.addEventListener("open", () => {
+      statusEl.textContent = "connected";
+    });
+
+    ev.addEventListener("error", () => {
+      statusEl.textContent = "disconnected (retrying…)";
+    });
+
+    ev.addEventListener("hello", () => {
+      statusEl.textContent = "connected";
+    });
+
+    // --- 2) Listen for "linear" events sent by webhook-server.ts ---
+    ev.addEventListener("linear", (e) => {
+      const data = JSON.parse(e.data || "{}");
+
+      // Create a new message card
+      const div = document.createElement("div");
+      div.className = "msg";
+
+      const type = data.type || data.event || "Event";
+      const action = data.action || "";
+      const id = data?.data?.id || data?.id || "";
+      const when = new Date(data.receivedAt || Date.now()).toLocaleString();
+
+      // Populate the card’s HTML
+      div.innerHTML = `
+        <div class="hdr">
+          <span class="badge">${type}</span>
+          <strong>${action}</strong>
+          <span>${id}</span>
+          <span class="ts">${when}</span>
+        </div>
+        <pre>${JSON.stringify(data, null, 2)}</pre>
+      `;
+
+      // Prepend newest messages to the top
+      feed.prepend(div);
+    });
+  </script>
+</body>
+</html>
+
