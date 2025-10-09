@@ -3,16 +3,22 @@
  * --------------
  * Minimal, production-safe example of creating an issue via the Linear TypeScript SDK,
  * with clear annotations for each step (env, client init, team selection, mutation, logging).
+ * Co-generated Craig Lewis & Chatgpt
  *
  * Usage:
  *   npx ts-node src/createIssue.ts
  *   npx ts-node src/createIssue.ts --team "Engineering" --title "Customer onboarding checklist"
+ * 
+ *   Requires Linear API key in .env file
+ *   Run with npx ts-node src/createIssue-annotated.ts
  */
 
 import "dotenv/config";            // 1) Load .env before anything else so process.env is populated.
 import { LinearClient } from "@linear/sdk"; // 2) Official Linear SDK (typed GraphQL client).
-import fetch from "cross-fetch";   // 3) Polyfill fetch for Node environments (SDK expects global fetch).
-(globalThis as any).fetch ??= fetch; // 4) Provide fetch globally if it's not already present.
+
+// Uncomment next two lines if your Node version lacks global fetch
+//import fetch from "cross-fetch";   // 3) Polyfill fetch for Node environments (SDK expects global fetch).
+//(globalThis as any).fetch ??= fetch; // 4) Provide fetch globally if it's not already present.
 
 // 5) Read and validate the API key from .env (LINEAR_API_KEY=lin_api_...).
 const apiKey = process.env.LINEAR_API_KEY;

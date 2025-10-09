@@ -1,11 +1,28 @@
-/** SDK script that filters by assignee email, label name, and/or workflow state name, then prints counts by state. It uses server-side filtering for the assignee (reliable) and narrows label/state client-side to avoid schema gotchas. It also supports a --since <days> window and --include-archived.**/
+/**
+ * issuesFiltered.ts
+ * -----------------
+ *  Quick app to review issues assigned to a user, with optional filters. 
+ *  see issuesFiltered-annotated.ts for detailed comments on each step.
+ *  * Co-generated Craig Lewis & Chatgpt
+ *   
+ *
+ */
 
+ * Usage examples:
+ *   npx ts-node src/issuesFiltered.ts --since 7
+ *   npx ts-node src/issuesFiltered.ts --email "teammate@company.com" --label "Needs Triage"
+ *   npx ts-node src/issuesFiltered.ts --state "In Progress" --include-archived
+ * 
+ *  * Co-generated Craig Lewis & Chatgpt
+
+ */
 
 
 import "dotenv/config";
 import { LinearClient, Issue } from "@linear/sdk";
-import fetch from "cross-fetch";
-(globalThis as any).fetch ??= fetch;
+// Uncomment next two lines if your Node version lacks global fetch
+//import fetch from "cross-fetch";   // 3) Polyfill fetch for Node environments (SDK expects global fetch).
+//(globalThis as any).fetch ??= fetch; // 4) Provide fetch globally if it's not already present.
 
 const apiKey = process.env.LINEAR_API_KEY;
 if (!apiKey) throw new Error("Missing LINEAR_API_KEY in .env");

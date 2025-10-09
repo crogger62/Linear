@@ -1,10 +1,15 @@
-/* Show teams on project*/
+/** Show teams on project
+* 
+*  Simple script to list all teams visible to the API key, paginated.
+*/
 
 
 import "dotenv/config";
 import { LinearClient } from "@linear/sdk";
-import fetch from "cross-fetch";
-(globalThis as any).fetch ??= fetch;
+
+// Uncomment next two lines if your Node version lacks global fetch
+//import fetch from "cross-fetch";   // 3) Polyfill fetch for Node environments (SDK expects global fetch).
+//(globalThis as any).fetch ??= fetch; // 4) Provide fetch globally if it's not already present.
 
 const apiKey = process.env.LINEAR_API_KEY;
 if (!apiKey) throw new Error("Missing LINEAR_API_KEY in .env");

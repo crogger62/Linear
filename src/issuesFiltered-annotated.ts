@@ -1,5 +1,5 @@
 /**
- * issuesFiltered.ts
+ * issuesFiltered-annotated.ts
  * -----------------
  * Demonstrates advanced filtering of issues via the Linear TypeScript SDK.
  * Filters: assignee email, label name, state name, "updated since N days", include archived.
@@ -9,6 +9,9 @@
  *   npx ts-node src/issuesFiltered.ts --since 7
  *   npx ts-node src/issuesFiltered.ts --email "teammate@company.com" --label "Needs Triage"
  *   npx ts-node src/issuesFiltered.ts --state "In Progress" --include-archived
+ * 
+ *  * Co-generated Craig Lewis & Chatgpt
+
  */
 
 import "dotenv/config";             // 1) Load LINEAR_API_KEY from .env before anything else.
