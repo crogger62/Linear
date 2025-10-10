@@ -12,9 +12,9 @@ Project to learn to access the Linear (linear.app) API (see https://linear.app/d
 
 * createIssue-annotated.ts - Commented version of an app to create an issue from the command line; flags:
 
-  --team <team name> defaults to current user's team
+  --team "team name" defaults to current user's team
   
-  --title <title name> defaults to timedate stamp
+  --title "title name" defaults to timedate stamp
   
   --include-archived as needed
 
@@ -35,7 +35,7 @@ Project to learn to access the Linear (linear.app) API (see https://linear.app/d
 Typescript apps to create an issue, list issues (w/filtering), produce a count of issues per user and use of a webhook to catch various events defined in the API.
 
 Requires Linear API key in .env
-Webhook-server.ts requires webhook API key in .env. which you can get here: https://linear.app/crog/settings/api
+Webhook-server.ts requires webhook API key in .env. which you can get in Settings->API
 
 Versions with "-annotated" have additional comments
 
