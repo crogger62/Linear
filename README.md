@@ -12,7 +12,7 @@ Project to learn to access the Linear (linear.app) API (see https://linear.app/d
 
 * createIssue-annotated.ts - Commented version of an app to create an issue from the command line; flags:
 
-  --team <teamname> defaults to current user's team
+  --team <team name> defaults to current user's team
   
   --title <title name> defaults to timedate stamp
   
