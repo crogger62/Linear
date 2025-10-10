@@ -30,6 +30,8 @@ Project to learn to access the Linear (linear.app) API (see https://linear.app/d
   
   --include-archived  (include archived issues in results)
 
+* webhook-server.ts - app to trial webhook using simple html page; see source for running instructions
+
 Typescript apps to create an issue, list issues (w/filtering), produce a count of issues per user and use of a webhook to catch various events defined in the API.
 
 Requires Linear API key in .env
