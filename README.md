@@ -2,15 +2,15 @@
 
 Project to learn to access the Linear (linear.app) API (see https://linear.app/developers/graphql)
 
-me.ts - Simple app to show the current user
+* me.ts - Simple app to show the current user
 
-teams.ts - List teams visible to API key
+* teams.ts - List teams visible to API key
 
-myIssueCounts.ts - Counts by workflow state for current user; add flag 
+* myIssueCounts.ts - Counts by workflow state for current user; add flag 
 
   --include-archived as needed
 
-createIssue-annotated.ts - Commented version to create an issue from the command line; flags:
+* createIssue-annotated.ts - Commented version of an app to create an issue from the command line; flags:
 
   --team <teamname> defaults to current user's team
   
@@ -18,7 +18,7 @@ createIssue-annotated.ts - Commented version to create an issue from the command
   
   --include-archived as needed
 
-issuesFiltered-annotated.ts - Commented version to filter issues based on several flags: 
+* issuesFiltered-annotated.ts - Commented version of an app to filter issues based on several flags: 
   
   --email "emailid"
   
