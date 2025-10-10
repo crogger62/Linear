@@ -1,15 +1,14 @@
 /**
  * me.ts
  * --------------
- * Quick use of API to obtain name of user
- * Co-generated Craig Lewis & Chatgpt
+ * Quick use of API to obtain name of user, e.g., whoami
+ * Co-generated Craig Lewis & Chatgpt\
  *
  * Usage:
- *   npx ts-node src/createIssue.ts
- *   npx ts-node src/createIssue.ts --team "Engineering" --title "Customer onboarding checklist"
- * 
+ *   npx ts-node src/me.ts
+ *  
  *   Requires Linear API key in .env file
- *   Run with npx ts-node src/createIssue-annotated.ts
+ *
  */
 
 
@@ -20,13 +19,13 @@ import { LinearClient } from "@linear/sdk";
 // import fetch from "cross-fetch";          // Uncomment this and the next line if cross-fetch not in your node version
 //(globalThis as any).fetch ??= fetch;
 
-const apiKey = process.env.LINEAR_API_KEY;
+const apiKey = process.env.LINEAR_API_KEY;  // get the key
 if (!apiKey) throw new Error("Missing LINEAR_API_KEY in .env");
 
 const client = new LinearClient({ apiKey });
 
 async function main() {
-  const me = await client.viewer;
+  const me = await client.viewer;   //easy-peasy
   console.log({ id: me.id, name: me.name, email: me.email });
 }
 

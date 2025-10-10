@@ -1,5 +1,5 @@
 /**
- * webhook-server.ts
+ * webhook-server.ts 
  * -----------------
  * A minimal Express app that:
  *  1) Serves a static widget page from ./public (e.g., public/widget.html).

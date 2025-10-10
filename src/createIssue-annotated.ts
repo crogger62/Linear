@@ -1,16 +1,22 @@
 /**
- * createIssue.ts
+ * createIssue.ts  
  * --------------
  * Minimal, production-safe example of creating an issue via the Linear TypeScript SDK,
  * with clear annotations for each step (env, client init, team selection, mutation, logging).
+ * Annotated version with additional comments and explanations. 
+ * 
  * Co-generated Craig Lewis & Chatgpt
  *
  * Usage:
  *   npx ts-node src/createIssue.ts
  *   npx ts-node src/createIssue.ts --team "Engineering" --title "Customer onboarding checklist"
+ *     if no team is specified, default to first visible team
+ *     if no title is specified, default to timestamped title
+ * 
+ *   Stubs in place to update other fields on issue
  * 
  *   Requires Linear API key in .env file
- *   Run with npx ts-node src/createIssue-annotated.ts
+ * 
  */
 
 import "dotenv/config";            // 1) Load .env before anything else so process.env is populated.
