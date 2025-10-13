@@ -9,26 +9,18 @@
  *   npx ts-node src/issuesFiltered.ts --since 7
  *   npx ts-node src/issuesFiltered.ts --email "teammate@company.com" --label "Needs Triage"
  *   npx ts-node src/issuesFiltered.ts --state "In Progress" --include-archived
- *   
- *   Flags supported:
- *    --email "emailid"
- *    --label "label name"
- *    --state "workflow state name"
- *    --since N   (only issues updated in last N days)
- *    --include-archived  (include archived issues in results)
- *  
  * 
  *  * Co-generated Craig Lewis & Chatgpt
- * 
- * 
+ *  * Requires Linear API key in .env file
+ *  * Run with npx ts-node src/issuesFiltered-annotated.ts
+
  */
 
 import "dotenv/config";             // 1) Load LINEAR_API_KEY from .env before anything else.
 import { LinearClient, Issue } from "@linear/sdk";  // 2) Import typed SDK classes.
-
 // Uncomment next two lines if your Node version lacks global fetch
-//import fetch from "cross-fetch";    // 3) Polyfill fetch (SDK relies on globalThis.fetch).
-//(globalThis as any).fetch ??= fetch; // 4) Make sure fetch exists globally (Node ≤20 needs this).
+//import fetch from "cross-fetch";   // 3) Polyfill fetch for Node environments (SDK expects global fetch).
+//(globalThis as any).fetch ??= fetch; // 4) Provide fetch globally if it's not already present.
 
 // 5) Validate API key.
 const apiKey = process.env.LINEAR_API_KEY;

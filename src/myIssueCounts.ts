@@ -1,13 +1,15 @@
-/* 
- * myIssueCounts
+/**
+ * myIssueCounts.ts
  * --------------
- * counts by workflow state for issues assigned to current user.
- * 
- *  npx ts-node src/myIssueCounts.ts [--include-archived]
- *    --include-archived  include archived issues in the counts
+ * Quick use of API to obtain number of issues assigned to the user
  * 
  * Co-generated Craig Lewis & Chatgpt
+ *
+ * Usage:
+ *   npx ts-node src/myIssueCounts.ts
+ *   npx ts-node src/myIssueCounts.ts --include-archived
  * 
+ *   Requires Linear API key in .env file
  */
 
 import "dotenv/config";
@@ -18,7 +20,7 @@ import { LinearClient } from "@linear/sdk";
 //(globalThis as any).fetch ??= fetch; // 4) Provide fetch globally if it's not already present.
 
 
-const apiKey = process.env.LINEAR_API_KEY;   // get yer key
+const apiKey = process.env.LINEAR_API_KEY;
 if (!apiKey) throw new Error("Missing LINEAR_API_KEY in .env");
 
 const client = new LinearClient({ apiKey });

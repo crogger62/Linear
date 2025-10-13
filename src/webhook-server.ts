@@ -1,10 +1,10 @@
 /**
- * webhook-server.ts 
+ * webhook-server.ts
  * -----------------
  * A minimal Express app that:
  *  1) Serves a static widget page from ./public (e.g., public/widget.html).
  *  2) Provides a Server-Sent Events (SSE) stream at GET /events for live push updates.
- *  3) Verifies and handles Linear webhooks at POST /linear-webhook.
+ *  3) Verifies and handles Linear webhooks at POST /linear-webhook using HMAC-SHA256.
  *  4) (Dev) Offers POST /dev/ping to broadcast a test event without Linear.
  *
  * Requirements:
@@ -13,25 +13,15 @@
  *   - npm i -D @types/express @types/body-parser
  *   - .env with:
  *       LINEAR_API_KEY=lin_api_************************
- *       WEBHOOK_SECRET=linw_wh__**************************
+ *       WEBHOOK_SECRET=whsec_**************************
  *
+ * Run:
+ *   npx ts-node src/webhook-server.ts
+ *   (open http://localhost:3000/widget.html)
  *
- * Steps to running:
- * 1) start the webook server  "npx ts-node src/webhook-server.ts"
- *       and make sure you see it listening on localhost
- * 2) Open the widget http://localhost:3000/widget.html - server events will show up here
- *        widget.html page should show "connected"
- *        quick test - run "curl -X POST //localhost:3000/dev/ping" and look for PING on widget page
- * 3) Use ngrok to expose server - "ngrok http 3000"
- *        snag the Forwarding URL from the ngrok output
- * 4) Create a webhook on the Linear API webhook page:https://linear.app/crog/settings/api/webhooks/new
- *        for the URL, use the Forwarding URL above and append "/linear-webhook" to the URL 
- *        select the events on the Linear API webhook 
- *        copy the WEBHOOK_SECRET from the API screen and use this in your .env file (see format above)
- * 5) Restart webhook server to pickup new secret
- * 6) Use linear normally for events selected above, the webhook will fire and you will see the results on widget.html
- * 
- *
+ * Expose publicly (choose one) and register the webhook in Linear:
+ *   ngrok http 3000
+ *   cloudflared tunnel --url http://localhost:3000  <- used for local testing
  */
 
 import "dotenv/config";                           // Load environment variables from .env at startup.
