@@ -1,4 +1,4 @@
-# Linear
+**# Linear
 
 Project to learn to access the Linear (linear.app) API (see https://linear.app/developers/graphql)
 
@@ -41,3 +41,4 @@ Versions with "-annotated" have additional comments
 
 
 
+**
