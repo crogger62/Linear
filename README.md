@@ -1,44 +1,39 @@
-**# Linear
+# ⚡ Linear API Learning Project
 
-Project to learn to access the Linear (linear.app) API (see https://linear.app/developers/graphql)
+> A collection of small TypeScript scripts exploring the [Linear API](https://linear.app/developers/graphql).  
+> These examples demonstrate authentication, querying, filtering, issue creation, and webhook integration.
 
-* me.ts - Simple app to show the current user
+---
 
-* teams.ts - List teams visible to API key
+## 📘 Overview
 
-* myIssueCounts.ts - Counts by workflow state for current user; add flag 
+This project is designed to help you learn how to interact with Linear’s GraphQL API using Node.js and TypeScript.  
+Each script demonstrates a specific API feature — from basic queries to webhook handling.
 
-  --include-archived as needed
+---
 
-* createIssue-annotated.ts - Commented version of an app to create an issue from the command line; flags:
+## 🧩 Project Scripts
 
-  --team "team name" defaults to current user's team
-  
-  --title "title name" defaults to timedate stamp
-  
-  --include-archived as needed
+| File | Description |
+|------|--------------|
+| **`me.ts`** | Displays the current user authenticated via your Linear API key. |
+| **`teams.ts`** | Lists all teams visible to the API key. |
+| **`myIssueCounts.ts`** | Counts issues by workflow state for the current user.<br>Use `--include-archived` to include archived issues. |
+| **`createIssue-annotated.ts`** | Creates a new issue from the command line.<br>Includes inline documentation and supports the following flags:<br><br>• `--team "team name"` — defaults to the current user’s team<br>• `--title "title name"` — defaults to a timestamp<br>• `--include-archived` — include archived issues |
+| **`issuesFiltered-annotated.ts`** | Filters issues using several flags:<br><br>• `--email "emailid"`<br>• `--label "label name"`<br>• `--state "workflow state name"`<br>• `--since N` — issues updated in the last *N* days<br>• `--include-archived` — include archived issues |
+| **`webhook-server.ts`** | Simple Express-based app to trial webhooks using a lightweight HTML interface.<br>See comments in source for setup and usage instructions. |
 
-* issuesFiltered-annotated.ts - Commented version of an app to filter issues based on several flags: 
-  
-  --email "emailid"
-  
-  --label "label name"
-  
-  --state "workflow state name"
-  
-  --since N   (only issues updated in last N days)
-  
-  --include-archived  (include archived issues in results)
+---
 
-* webhook-server.ts - app to trial webhook using simple html page; see source for running instructions
+## ⚙️ Setup
 
-Typescript apps to create an issue, list issues (w/filtering), produce a count of issues per user and use of a webhook to catch various events defined in the API.
+### 1️⃣ Prerequisites
+- Node.js (v20+ recommended)  
+- TypeScript  
+- Linear API key  
 
-Requires Linear API key in .env
-Webhook-server.ts requires webhook API key in .env. which you can get in Settings->API
-
-Versions with "-annotated" have additional comments
-
-
-
-**
+### 2️⃣ Installation
+```bash
+git clone https://github.com/<yourusername>/linear.git
+cd linear
+npm install
