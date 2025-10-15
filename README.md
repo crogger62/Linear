@@ -23,7 +23,7 @@ Each script demonstrates a specific API feature — from basic queries to webhoo
 | **`issuesFiltered-annotated.ts`** | Filters issues using several flags:<br><br>• `--email "emailid"`<br>• `--label "label name"`<br>• `--state "workflow state name"`<br>• `--since N` — issues updated in the last *N* days<br>• `--include-archived` — include archived issues |
 | **`webhook-server.ts`** | Simple Express-based app to trial webhooks using a lightweight HTML interface.<br>See comments in source for setup and usage instructions. |
 | **`listIssuePaginated.ts`** | List all issues using cursor / pagination. | | **`listIssuePaginated.ts`** | List all issues using cursor / pagination. || **`listIssuePaginated.ts`** | List all issues using cursor / pagination. | | **`listIssuePaginated.ts`** | List all issues using cursor / pagination. |
-| **`workspaceSnapshot.ts`** | Collects all open Linear issues and summarizes them by project, workflow state, and assignee and outputs them as Markdown or CSV showing open-issu details, active projects and workload per user | 
+| **`workspaceSnapshot.ts`** | Collects all open Linear issues and summarizes them by project, workflow state, and assignee and outputs them as Markdown or CSV showing open-issue details, active projects and workload per user | 
 
 ---
 
