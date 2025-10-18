@@ -1,0 +1,22 @@
+section,project,state,identifier,title,assignee
+issues_by_project_state,(No Project),Todo,CRO-22,Sub issue to be promoted,(unassigned)
+issues_by_project_state,(No Project),Todo,CRO-21,Sub issue #1,(unassigned)
+issues_by_project_state,(No Project),Todo,CRO-19,New Issue: 1204,(unassigned)
+issues_by_project_state,(No Project),Todo,CRO-17,Github integrated correctly,(unassigned)
+issues_by_project_state,(No Project),Todo,CRO-4,Connect GitHub or GitLab,(unassigned)
+issues_by_project_state,(No Project),Todo,CRO-9,Next steps,(unassigned)
+issues_by_project_state,(No Project),Todo,CRO-7,Use Projects to organize work for features or releases,(unassigned)
+issues_by_project_state,(No Project),Todo,CRO-5,Customize settings,(unassigned)
+issues_by_project_state,(No Project),Todo,CRO-8,Invite your teammates,(unassigned)
+issues_by_project_state,(No Project),Todo,CRO-6,Use Cycles to focus work over n–weeks,(unassigned)
+issues_by_project_state,(No Project),Backlog,CRO-12,My Created Issue,(unassigned)
+issues_by_project_state,(No Project),In Progress,CRO-1,Welcome to Linear 👋,(unassigned)
+issues_by_project_state,Learn linear.api,Backlog,CRO-16,Bulk label & comment helper,(unassigned)
+issues_by_project_state,Learn linear.api,Backlog,CRO-15,Counts by state for my assigned issues,(unassigned)
+issues_by_project_state,File Sorter,Todo,CRO-11,Here it is,Craig Lewis
+,,,,,
+section,project,project_id,state,open_issues,
+,,,,,
+section,assignee,open_issues,,,
+assignee_load,(unassigned),14,,,
+assignee_load,Craig Lewis,1,,,
