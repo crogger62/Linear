@@ -8,14 +8,7 @@
  *
  */
 
- * Usage examples:
- *   npx ts-node src/issuesFiltered.ts --since 7
- *   npx ts-node src/issuesFiltered.ts --email "teammate@company.com" --label "Needs Triage"
- *   npx ts-node src/issuesFiltered.ts --state "In Progress" --include-archived
- * 
- *  * Co-generated Craig Lewis & Chatgpt
-
- */
+ 
 
 
 import "dotenv/config";
