@@ -12,3 +12,7 @@ dist/
 .DS_Store
 .vscode/
 
+# mis
+*.csv
+*.xls
+*.xlsx
