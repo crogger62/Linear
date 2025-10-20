@@ -31,7 +31,12 @@ type Need = {
   id: string;
   body?: string | null;
   priority?: number | null;
-  customer?: { id: string; name?: string | null } | null;
+  customer?: {
+    id: string;
+    name?: string | null;
+    revenue?: string | null;
+    size?: string | null;
+  } | null;
   attachment?: { url?: string | null } | null;
   // Optional references on the Need itself (leave blank if schema/workspace doesn't populate them)
   project?: { id: string; name?: string | null } | null;
@@ -44,6 +49,8 @@ type Row = {
   issueTitle: string;
   requestId: string;
   customer: string;
+  customerRevenue: string;
+  customerSize: string;
   priority: string;
   source: string;
   referenceProject: string; // need.project?.name (if present)
@@ -98,7 +105,7 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
           body
           priority
           attachment { url }
-          customer { id name }
+          customer { id name revenue size }
           project { id name }          # reference project (if present)
           issue { id identifier title }# reference issue   (if present)
         }
@@ -191,6 +198,8 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
           issueTitle,
           requestId: n.id,
           customer: n.customer?.name ?? "",
+          customerRevenue: n.customer?.revenue ?? "",
+          customerSize: n.customer?.size ?? "",
           priority: normalizePriority(n.priority),
           source: n.attachment?.url ?? "",
           referenceProject: n.project?.name ?? "",
@@ -215,6 +224,8 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
     "issue_title",
     "request_id",
     "customer",
+    "customer_revenue",
+    "customer_size",
     "priority",
     "source",
     "reference_project",
@@ -230,13 +241,27 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
       csvEscape(r.issueTitle),
       csvEscape(r.requestId),
       csvEscape(r.customer),
+      csvEscape(r.customerRevenue),
+      csvEscape(r.customerSize),
       csvEscape(r.priority),
       csvEscape(r.source),
       csvEscape(r.referenceProject),
       csvEscape(r.referenceIssue),
       csvForceQuotes(r.request), // ALWAYS in double quotes
     ].join(","));
-    console.log(r.project, r.issue, r.issueTitle, r.requestId, r.customer, r.priority, r.source, r.referenceProject, r.referenceProject); 
+    console.log(
+      r.project,
+      r.issue,
+      r.issueTitle,
+      r.requestId,
+      r.customer,
+      r.customerRevenue,
+      r.customerSize,
+      r.priority,
+      r.source,
+      r.referenceProject,
+      r.referenceProject
+    ); 
   }
 
   const fs = await import("node:fs/promises");

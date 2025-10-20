@@ -23,13 +23,20 @@ import re
 import sys
 import math
 import argparse
-from typing import List, Tuple
+from html import escape
+from typing import List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.feature_extraction.text import TfidfVectorizer
+
+# Module-level debug flag and simple printer so summarize_cluster_llm can print the prompt
+DEBUG = False
+def dbg_print(*a, **kw):
+    if DEBUG:
+        print(*a, **kw)
 
 # ---------- Optional OpenAI client (used if OPENAI_API_KEY is set) ----------
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
@@ -44,56 +51,78 @@ if OPENAI_KEY:
 
 
 # ------------------------------ CSV LOADER ----------------------------------
-def load_texts(csv_path: str) -> List[str]:
+def load_texts(csv_path: str) -> Tuple[pd.DataFrame, List[str], List[str], List[float], List[float], str]:
     """
     Robust loader that:
       - infers delimiter
       - normalizes headers
       - drops Excel 'Unnamed' columns
-      - auto-detects the most 'text-like' column if 'text' not present
+      - prefers 'request' column if present, otherwise falls back to 'text' or other text-like columns
     """
     df = pd.read_csv(csv_path, sep=None, engine="python")
 
     # Normalize column names
     df.columns = [str(c).strip().lower() for c in df.columns]
 
-    # Drop unnamed index columns
+    # Drop unnamed index columns like 'Unnamed: 0'
     df = df.loc[:, [c for c in df.columns if not re.match(r"^unnamed:?\s*\d*$", c)]]
 
-    # Preferred column
-    if "text" in df.columns:
+    # ✅ Preferred column priority:
+    if "request" in df.columns:
+        col = "request"
+    elif "text" in df.columns:
         col = "text"
     else:
-        # Common synonyms
+        # Common fallback synonyms
         candidates = [
-            "request", "customer request", "feedback", "comment",
-            "description", "body", "message", "notes", "issue", "content"
+            "customer request", "feedback", "comment", "description", 
+            "body", "message", "notes", "issue", "content"
         ]
         col = next((c for c in df.columns if c in candidates), None)
 
         if col is None:
-            # Choose most "text-like" column by length & non-null ratio + name hint
+            # Auto-detect most text-like column based on length, non-null %, and column name clues
             def score_series(s: pd.Series):
                 nonnull = s.dropna().astype(str)
                 avg_len = nonnull.map(len).mean() if len(nonnull) else 0.0
                 frac_nonnull = len(nonnull) / max(len(s), 1)
-                name_bonus = 5.0 if re.search(r"text|request|feedback|comment|desc|message|notes|issue|content",
-                                               s.name or "") else 0.0
+                name_bonus = 5.0 if re.search(r"request|text|feedback|comment|desc|message|notes|issue|content", s.name or "") else 0.0
                 return frac_nonnull * 10.0 + (avg_len / 50.0) + name_bonus
 
             col = max(df.columns, key=lambda c: score_series(df[c]))
 
-    texts = (
+    # Extract cleaned values and keep their original indices so we can align other columns
+    cleaned = (
         df[col]
         .astype(str)
         .map(lambda s: s.strip())
         .replace({"": pd.NA})
-        .dropna()
-        .tolist()
     )
+    cleaned = cleaned.dropna()
+    # Preserve the full original rows for the cleaned indices so downstream code can access all CSV fields
+    df_clean = df.loc[cleaned.index].copy()
+    for numeric_col in ("customer_revenue", "customer_size"):
+        if numeric_col in df_clean.columns:
+            df_clean[numeric_col] = pd.to_numeric(df_clean[numeric_col], errors="coerce").fillna(0)
+        else:
+            df_clean[numeric_col] = 0
+    texts = cleaned.tolist()
+
+    # Extract priority column values aligned to the cleaned rows if present
+    if "priority" in df.columns:
+        # take values corresponding to the cleaned rows
+        pr_series = df.loc[cleaned.index, "priority"].astype(str).map(lambda s: s.strip())
+        priorities = pr_series.tolist()
+    else:
+        priorities = ["" for _ in texts]
+
     if not texts:
-        raise ValueError("No non-empty text rows found after parsing.")
-    return texts
+        raise ValueError(f"No non-empty rows found in column '{col}'.")
+
+    revenues = df_clean["customer_revenue"].astype(float).tolist()
+    sizes = df_clean["customer_size"].astype(float).tolist()
+
+    return df_clean, texts, priorities, revenues, sizes, col
 
 
 # --------------------------- TEXT PREPROCESSING ------------------------------
@@ -165,9 +194,50 @@ def choose_k_auto(X: np.ndarray, k_min: int, k_max: int) -> int:
     return max(k_min, best_k)
 
 
-def cluster_texts(X: np.ndarray, k: int) -> Tuple[np.ndarray, KMeans]:
+def compute_weights(priorities: List[str], revenues: List[float], sizes: List[float]) -> Optional[np.ndarray]:
+    """
+    Compute sample weights from priority plus customer metadata.
+
+    Policy:
+      - Start from priority weight (5 for high/urgent signals, otherwise 1)
+      - Scale by log1p of customer revenue and size so large accounts get extra emphasis
+
+    Returns an array of floats (same length as priorities) or None if weights remain uniform.
+    """
+    if not priorities:
+        return None
+
+    weights: List[float] = []
+    revenue_len = len(revenues)
+    size_len = len(sizes)
+    priority_tokens = {"1", "high", "priority", "p", "urgent", "true", "Important", "important"}
+
+    for idx, p in enumerate(priorities):
+        p_low = (p or "").strip().lower()
+        base = 5.0 if p_low in priority_tokens else 1.0
+
+        revenue = revenues[idx] if idx < revenue_len else 0.0
+        size = sizes[idx] if idx < size_len else 0.0
+
+        raw_revenue_factor = 1.0 + math.log1p(max(revenue, 0.0))
+        revenue_factor = math.log(max(raw_revenue_factor, 1e-9)) if raw_revenue_factor > 0 else 0.0
+        size_factor = 1.0 + math.log1p(max(size, 0.0))
+
+        weight = base * revenue_factor * size_factor
+        weights.append(weight)
+
+    arr = np.array(weights, dtype=float)
+    if arr.size == 0 or np.allclose(arr, arr[0]):
+        return None
+    return arr
+
+
+def cluster_texts(X: np.ndarray, k: int, sample_weight: Optional[np.ndarray] = None) -> Tuple[np.ndarray, KMeans]:
     km = KMeans(n_clusters=k, n_init="auto", random_state=42)
-    km.fit(X)
+    if sample_weight is not None:
+        km.fit(X, sample_weight=sample_weight)
+    else:
+        km.fit(X)
     return km.labels_, km
 
 
@@ -178,16 +248,41 @@ def summarize_cluster_llm(texts: List[str]) -> str:
     """
     if _openai_client is None:
         return ""
-    joined = "\n".join(f"- {t}" for t in texts[:50])  # cap prompt size
-    prompt = (
-        "You are helping a PM/CSM synthesize customer feedback.\n"
-        "Given the sample requests below, write 2–4 sentences that:\n"
-        "• Name the core pain point in plain language\n"
-        "• Describe nuance (e.g., frustration/confusion, expectations)\n"
-        "• Infer likely intent type(s): Bug, Feature Request, Usability/UX, Documentation/Clarity, Performance/Quality\n"
-        "Be concise and non-marketing.\n\n"
-        f"Sample requests:\n{joined}\n"
-    )
+    # Join all provided lines (one per request) into the prompt; do not silently cap them here
+    joined = "\n".join(f"- {t}" for t in texts)
+    dbg_print(f"[debug] Preparing LLM summary for {len(texts)} texts.\n"+joined)
+
+    # Prefer a user-editable prompt template file; fallback to the inline prompt when not present
+    try:
+        from pathlib import Path
+        p = Path(__file__).parent / "analysis.prompt"
+        if p.exists():
+            template = p.read_text(encoding="utf-8")
+            # If the template doesn't include a {joined} placeholder, append the sample block
+            if "{joined}" in template:
+                prompt = template.format(joined=joined)
+                dbg_print("[debug] analysis.prompt contains {joined}; used template with substitution.")
+            else:
+                prompt = template.rstrip() + "\n\nSample requests:\n" + joined
+                dbg_print("[debug] analysis.prompt missing {joined}; appended Sample requests block.")
+        else:
+            raise FileNotFoundError
+    except Exception:
+        dbg_print("[debug] Analysis prompt file not found; using inline prompt.")
+        prompt = (
+            "You are helping a company synthesize customer feedback.\n"
+            "Given the sample requests below, write 2–4 sentences that:\n"
+            " \u2022 Explain the core concept that ties these elements together conceptually"
+            " Name the core pain point in plain language\n"
+            "These may arise from any industry, not just software.\n"
+            "Be concise and non-marketing.\n\n"
+            f"Sample requests:\n{joined}\n"
+        )
+    # DEBUG: print the full prompt sent to the LLM when debug is enabled
+    dbg_print("[debug] Attempting to load analysis prompt from:", str(p))
+    dbg_print("[debug] LLM prompt:\n" + prompt)
+    dbg_print("[debug] LLM request sent")
+
     try:
         resp = _openai_client.chat.completions.create(
             model="gpt-4o-mini",
@@ -259,6 +354,43 @@ def pick_examples(texts: List[str], k: int) -> List[str]:
     return texts_sorted[:k]
 
 
+def detect_customer_column(df: pd.DataFrame) -> Optional[str]:
+    """Return a candidate customer/name column from the dataframe, or None."""
+    candidates = [
+        "customer", "customer_name", "name", "user", "requester", "email", "account",
+    ]
+    for c in df.columns:
+        if c.lower() in candidates:
+            return c
+    # try fuzzy contains
+    for c in df.columns:
+        if re.search(r"customer|name|user|requester|account|email", str(c).lower()):
+            return c
+    return None
+
+
+def format_example(row: dict, text_col: str) -> str:
+    """Format a full-row dict into '<customer>:<text>' for outputs. Falls back to text only."""
+    customer_col = None
+    # prefer explicit keys if present
+    for k in ("customer", "customer_name", "name", "user", "requester", "account", "email"):
+        if k in row and row[k] and str(row[k]).strip():
+            customer_col = k
+            break
+    if customer_col is None:
+        # try any plausible key
+        for k in row.keys():
+            if re.search(r"customer|name|user|requester|account|email", str(k).lower()):
+                customer_col = k
+                break
+
+    customer = str(row.get(customer_col, "")).strip() if customer_col else ""
+    text = str(row.get(text_col, "")).strip()
+    if customer:
+        return f"{customer}: {text}"
+    return text
+
+
 # --------------------------------- MAIN -------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="Cluster & summarize customer requests.")
@@ -267,10 +399,18 @@ def main():
     ap.add_argument("--max-clusters", type=int, default=8, help="Upper bound for auto K.")
     ap.add_argument("--min-clusters", type=int, default=2, help="Lower bound for auto K.")
     ap.add_argument("--samples", type=int, default=3, help="Examples per cluster in outputs.")
+    ap.add_argument("--debug", "-d", action="store_true", help="Enable debug printing")
     args = ap.parse_args()
 
-    # Load & normalize
-    texts_raw = load_texts(args.csv_path)
+    # Simple debug helper: use dbg(...) to conditionally print when --debug passed
+    global DEBUG
+    DEBUG = bool(args.debug)
+    def dbg(*a, **kw):
+        if DEBUG:
+            print(*a, **kw)
+
+    # Load & normalize (preserve full rows)
+    df_clean, texts_raw, priorities, revenues, customer_sizes, text_col = load_texts(args.csv_path)
     texts = preprocess_texts(texts_raw)
 
     if len(texts) < 2:
@@ -290,54 +430,119 @@ def main():
         X = vectorize_texts_tfidf(texts)
         vec_mode = "tfidf"
 
+    dbg(f"[info] Vectorization mode: {vec_mode}")
+    try:
+        dbg("[debug] texts sample (first 20):")
+        for i, t in enumerate(texts[:20]):
+            dbg(f"[debug]   [{i}]: {t}")
+    except Exception:
+        dbg("[debug] texts sample unavailable")
+
     # Choose K
+    # Compute sample weights from priorities
+    sample_weight = compute_weights(priorities, revenues, customer_sizes)
+
     if args.k:
         k = max(1, min(args.k, len(texts) - 1))
     else:
+        # For now, choose_k_auto ignores sample_weight (silhouette_score doesn't accept weights).
+        # We keep the compute_weights call separate so it's easy to adapt later.
+        # auto-pick k
         k = choose_k_auto(X, args.min_clusters, args.max_clusters)
+        # CHANGED: ensure k is at least 4 (use the max of auto-picked k or 4)
+        k = max(k, 4)
+        # Clamp k to be less than number of samples (KMeans requires n_samples > n_clusters)
+        k = min(k, max(1, len(texts) - 1))
         # As a last resort if silhouette failed everywhere:
         if not (args.min_clusters <= k <= args.max_clusters):
             k = min(max(args.min_clusters, 2), max(2, min(args.max_clusters, len(texts) - 1)))
 
+    # Cluster (deferred to debug section below so we can optionally inspect inputs)
     # Cluster
-    labels, km = cluster_texts(X, k)
+    dbg(f"[debug] clustering inputs: X.shape={X.shape}, k={k}")
+    try:
+        dbg(f"[debug] X sample (first 3 rows):\n{X[:3]}")
+    except Exception:
+        pass
 
-    # Group texts by cluster
+    labels, km = cluster_texts(X, k, sample_weight=sample_weight)
+
+    dbg(f"[debug] clustering outputs: labels.shape={labels.shape}")
+    try:
+        dbg(f"[debug] labels sample (first 30): {labels[:30].tolist() if hasattr(labels, 'tolist') else labels[:30]}")
+    except Exception:
+        dbg(f"[debug] labels: {labels}")
+    dbg(f"[debug] km object: {km}")
+    dbg(f"[debug] km inertia: {getattr(km, 'inertia_', 'n/a')}, centers shape: {getattr(km, 'cluster_centers_', None).shape if getattr(km, 'cluster_centers_', None) is not None else 'n/a'}")
+# ...existing code...
+    # Group texts by cluster (carry full row dicts forward)
     clusters = []
     for ci in range(k):
         idxs = np.where(labels == ci)[0]
-        items = [texts_raw[i] for i in idxs]  # use raw originals for readability
-        clusters.append((ci, items))
+        items = [texts_raw[i] for i in idxs]  # short human-readable examples
+        items_rows = df_clean.iloc[idxs].to_dict(orient="records")  # full row dicts for API usage
+        clusters.append((ci, items, items_rows))
 
     # Rank by cluster size (desc)
     clusters.sort(key=lambda tpl: len(tpl[1]), reverse=True)
 
     # Summarize clusters
     summaries = []
-    for ci, items in clusters:
+    for ci, items, items_rows in clusters:
         terms = top_terms_for_cluster([t.lower() for t in items], [t.lower() for t in texts_raw])
+
+        # Build formatted examples for output (with customer names)
+        # Use the preserved full rows (items_rows) to ensure we include every request
+        # and preserve the cluster ordering. This avoids brittle text->row matching.
+        examples_fmt = []
+        for row in items_rows:
+            try:
+                examples_fmt.append(format_example(row, text_col))
+            except Exception:
+                # Fallback: include the raw text if formatting fails
+                examples_fmt.append(str(row.get(text_col, "")).strip())
+
+        # For the LLM prompt, use only the raw request texts (not customer names)
+        llm_request_texts = [r.get(text_col, "") for r in items_rows]
+
         if _openai_client and vec_mode == "embeddings":
-            summary = summarize_cluster_llm(items)
+            summary = summarize_cluster_llm(llm_request_texts)
             if not summary:
                 summary = heuristic_summary(items, terms)
         else:
             summary = heuristic_summary(items, terms)
-        summaries.append((ci, len(items), terms, pick_examples(items, args.samples), summary))
+
+        dbg(f"[debug] Cluster {ci} - items_count={len(items)}")
+        for i, it in enumerate(items[:10]):  # limit output to first 10 items
+            dbg(f"[debug]   item[{i}]: {it}")
+        dbg(f"[debug] Cluster {ci} - top terms: {', '.join(terms)}")
+        dbg(f"[debug] Cluster {ci} - summary: {summary}")
+
+        # Keep examples and summary; full-row data is available in items_rows for downstream API interactions
+        summaries.append((ci, len(items), terms, examples_fmt, summary, items_rows))
+
+    # Debug: print summary/row counts so we can trace missing entries
+    dbg(f"[debug] Preparing to write {len(summaries)} summaries to outputs")
+    for ci, count, terms, exs, summary, rows in summaries:
+        dbg(f"[debug] cluster {ci}: count={count}, exs_len={len(exs)}, rows_len={len(rows)}")
+        for i, row in enumerate(rows[:5]):
+            dbg(f"[debug]   sample row[{i}] text: {str(row.get(text_col, ''))[:200]}")
 
     # -------- Console Output --------
-    print("\n=== Top Pain-Point Clusters ===")
-    for ci, count, terms, exs, summary in summaries:
-        print(f"[Cluster {ci}] count={count}  key_terms={', '.join(terms[:6])}")
-        for e in exs:
-            print(f"  - {e}")
-        print(f"  summary: {summary}\n")
+    dbg("\n=== Top Pain-Point Clusters ===")
+    for ci, count, terms, exs, summary, rows in summaries:
+        dbg(f"[Cluster {ci}] count={count}  key_terms={', '.join(terms[:6])}")
+        # Print all preserved rows for visibility
+        for row in rows:
+            dbg(f"  - {format_example(row, text_col)}")
+        dbg(f"  summary: {summary}\n")
 
     # -------- CSV Output --------
     # pain_point_summary.csv with examples per row
-    max_examples = max((len(exs) for *_rest, exs, _sum in summaries), default=args.samples)
+    max_examples = max((len(exs) for *_rest, exs, _sum, _rows in summaries), default=args.samples)
     cols = ["Cluster", "Count"] + [f"Example_{i+1}" for i in range(max_examples)]
     rows = []
-    for ci, count, _terms, exs, _summary in summaries:
+    for ci, count, _terms, exs, _summary, _rows in summaries:
         row = [ci, count] + exs + [""] * (max_examples - len(exs))
         rows.append(row)
     pd.DataFrame(rows, columns=cols).to_csv("pain_point_summary.csv", index=False)
@@ -345,14 +550,18 @@ def main():
     # -------- Markdown Output --------
     md_lines = ["# Pain Points Summary\n"]
     md_lines.append(f"_Vectorization: {vec_mode}; clusters: {k}_\n")
-    for ci, count, terms, exs, summary in summaries:
+    for ci, count, terms, exs, summary, rows in summaries:
         md_lines.append(f"## Cluster {ci} ({count})")
-        md_lines.append(f"**Key terms:** {', '.join(terms)}")
+        #md_lines.append(f"**Key terms:** {', '.join(terms)}")
         md_lines.append("")
-        if exs:
+        # Use the preserved full rows to list examples so we include every request
+        if rows:
             md_lines.append("**Examples:**")
-            for e in exs:
-                md_lines.append(f"- {e}")
+            for row in rows:
+                try:
+                    md_lines.append(f"- {format_example(row, text_col)}")
+                except Exception:
+                    md_lines.append(f"- {str(row.get(text_col, '')).strip()}")
             md_lines.append("")
         md_lines.append("**Summary:**")
         md_lines.append(summary if summary else "(no summary)")
@@ -360,7 +569,46 @@ def main():
     with open("insights.md", "w", encoding="utf-8") as f:
         f.write("\n".join(md_lines))
 
-    print("Wrote: pain_point_summary.csv, insights.md")
+    # -------- HTML Output --------
+    html_lines = [
+        "<!DOCTYPE html>",
+        "<html lang=\"en\">",
+        "<head>",
+        "  <meta charset=\"utf-8\" />",
+        "  <title>Pain Points Summary</title>",
+        "  <style>body{font-family:Arial,Helvetica,sans-serif;margin:2rem;background:#f7f7f9;color:#1a1a1a;}h1{margin-bottom:0.5rem;}section{background:#fff;border-radius:8px;padding:1.25rem;margin-bottom:1.5rem;box-shadow:0 2px 6px rgba(0,0,0,0.06);}section h2{margin-top:0;color:#0f4c81;}section .meta{color:#555;font-size:0.9rem;margin-bottom:0.75rem;}section ul{margin:0 0 1rem 1.25rem;padding:0;}section li{margin-bottom:0.5rem;}section .summary{font-weight:600;}footer{margin-top:2rem;font-size:0.85rem;color:#555;}</style>",
+        "</head>",
+        "<body>",
+        "  <h1>Pain Points Summary</h1>",
+        #f"  <div class=\"meta\">Vectorization: {escape(str(vec_mode))}; clusters: {k}</div>",
+    ]
+
+    for ci, count, terms, exs, summary, rows in summaries:
+        html_lines.append("  <section>")
+        html_lines.append(f"    <h2>Cluster {ci} ({count})</h2>")
+        if rows:
+            html_lines.append("    <div class=\"meta\"><strong>Examples</strong></div>")
+            html_lines.append("    <ul>")
+            for row in rows:
+                try:
+                    example = format_example(row, text_col)
+                except Exception:
+                    example = str(row.get(text_col, "")).strip()
+                html_lines.append(f"      <li>{escape(example)}</li>")
+            html_lines.append("    </ul>")
+        html_lines.append("    <div class=\"meta\"><strong>Summary</strong></div>")
+        summary_text = summary if summary else "(no summary)"
+        html_lines.append(f"    <p class=\"summary\">{escape(summary_text)}</p>")
+        html_lines.append("  </section>")
+
+    html_lines.append("  <footer>Generated by analyze_feedback.py</footer>")
+    html_lines.append("</body>")
+    html_lines.append("</html>")
+
+    with open("insights.html", "w", encoding="utf-8") as f:
+        f.write("\n".join(html_lines))
+
+    print("Wrote: pain_point_summary.csv, insights.md, insights.html")
 
 
 if __name__ == "__main__":

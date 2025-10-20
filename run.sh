@@ -2,14 +2,14 @@
 #
 cd ~/linear-cli
 # 1. Download records from Linear
-npx ts-node src/customerRequests.ts
+npx ts-node src/customerRequests.ts > /dev/null
 # files end up in CustomerRequests.csv
 #
 # 2. Run python script
 #
 # Setup venv
 source feedback-analysis/.venv/bin/activate
-python3 feedback-analysis/analyze_feedback.py ./CustomerRequests.csv
+python3 feedback-analysis/analyze_feedback.py ./CustomerRequests.csv > /dev/null
 #
 #
 
