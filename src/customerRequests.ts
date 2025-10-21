@@ -115,6 +115,28 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
   }
 `;
 
+/** Pull current needs for a Project; include optional references to project/issue if available. */
+const PROJECT_NEEDS_QUERY = /* GraphQL */ `
+  query ProjectNeeds($projectId: String!, $first: Int!, $after: String) {
+    project(id: $projectId) {
+      id
+      name
+      needs(first: $first, after: $after) {
+        nodes {
+          id
+          body
+          priority
+          attachment { url }
+          customer { id name revenue size }
+          project { id name }
+          issue { id identifier title }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+`;
+
 /* --------------------------------- Main --------------------------------- */
 
 (async () => {
@@ -126,8 +148,10 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
   const client = new LinearClient({ apiKey });
   const gql = client.client;
 
-  // 1) Build the issue selection
+  // 1) Build the issue selection (and optionally remember project to scan for project-level needs)
   let issues: Issue[] = [];
+  let resolvedProjectId: string | undefined;
+  let resolvedProjectName: string | undefined;
 
   if (ISSUE_ID || ISSUE_IDENT) {
     if (ISSUE_ID) {
@@ -153,13 +177,14 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
       issues = matched;
     }
   } else if (PROJECT_ID || PROJECT_NAME) {
-    let resolvedProjectId = PROJECT_ID;
+    resolvedProjectId = PROJECT_ID;
     if (!resolvedProjectId && PROJECT_NAME) {
       const projects = await paginate<Project>((after) =>
         client.projects({ first: 50, after, filter: { name: { eq: PROJECT_NAME } } })
       );
       if (projects.length === 0) { console.error(`Project not found: ${PROJECT_NAME}`); process.exit(1); }
       resolvedProjectId = projects[0].id;
+      resolvedProjectName = projects[0].name ?? undefined;
     }
     issues = await paginate<Issue>((after) =>
       client.issues({
@@ -172,13 +197,9 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
     issues = await paginate<Issue>((after) => client.issues({ first: 50, after }));
   }
 
-  if (issues.length === 0) {
-    console.log("No matching issues.");
-    return;
-  }
-
   // 2) Gather rows
   const rows: Row[] = [];
+  const seen = new Set<string>(); // de-dupe by request id
   for (const issue of issues) {
     const issueIdentifier = issue.identifier;
     const issueTitle = (await issue.title) ?? "";
@@ -192,6 +213,8 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
       if (!edge) break;
 
       for (const n of edge.nodes as Need[]) {
+        if (seen.has(n.id)) continue;
+        seen.add(n.id);
         rows.push({
           project: projName,
           issue: issueIdentifier,
@@ -210,6 +233,50 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
 
       after = edge.pageInfo?.hasNextPage ? (edge.pageInfo.endCursor ?? null) : null;
     } while (after);
+  }
+
+  // 2b) Also gather project-level needs when scanning a specific project or the whole workspace
+  const pushProjectNeeds = async (projectId: string, projectName?: string | null) => {
+    let after: string | null | undefined = null;
+    do {
+      const resp = await gql.rawRequest(PROJECT_NEEDS_QUERY, { projectId, first: 50, after });
+      const data = resp.data as any;
+      const edge = data?.project?.needs;
+      if (!edge) break;
+      const hostName = projectName ?? data?.project?.name ?? "(Project)";
+      for (const n of edge.nodes as Need[]) {
+        if (seen.has(n.id)) continue;
+        seen.add(n.id);
+        rows.push({
+          project: hostName,
+          issue: "",                 // project-level; no hosting issue
+          issueTitle: "",
+          requestId: n.id,
+          customer: n.customer?.name ?? "",
+          customerRevenue: n.customer?.revenue ?? "",
+          customerSize: n.customer?.size ?? "",
+          priority: normalizePriority(n.priority),
+          source: n.attachment?.url ?? "",
+          referenceProject: n.project?.name ?? "",
+          referenceIssue: n.issue?.identifier ?? "",
+          request: (n.body ?? "").trim(),
+        });
+      }
+      after = edge.pageInfo?.hasNextPage ? (edge.pageInfo.endCursor ?? null) : null;
+    } while (after);
+  };
+
+  if (ISSUE_ID || ISSUE_IDENT) {
+    // Issue-scoped: leave as-is (do not add project-level needs)
+  } else if (resolvedProjectId) {
+    // Project-scoped: also include project-level needs
+    await pushProjectNeeds(resolvedProjectId, resolvedProjectName ?? null);
+  } else {
+    // Workspace-scoped: include project-level needs for all projects
+    const allProjects = await paginate<Project>((after) => client.projects({ first: 50, after }));
+    for (const p of allProjects) {
+      await pushProjectNeeds(p.id, p.name ?? null);
+    }
   }
 
   if (rows.length === 0) {
@@ -260,8 +327,8 @@ const ISSUE_NEEDS_QUERY = /* GraphQL */ `
       r.priority,
       r.source,
       r.referenceProject,
-      r.referenceProject
-    ); 
+      r.referenceIssue
+    );
   }
 
   const fs = await import("node:fs/promises");

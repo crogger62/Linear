@@ -23,6 +23,7 @@ import re
 import sys
 import math
 import argparse
+import json
 from html import escape
 from typing import List, Tuple, Optional
 
@@ -242,44 +243,56 @@ def cluster_texts(X: np.ndarray, k: int, sample_weight: Optional[np.ndarray] = N
 
 
 # ---------------------------- SUMMARIZATION ---------------------------------
-def summarize_cluster_llm(texts: List[str]) -> str:
+def summarize_cluster_llm(texts: List[str]) -> Tuple[str, str]:
     """
-    Use an LLM to generate a crisp pain-point summary with nuance & implied intent.
+    Use an LLM to generate a (title, summary) pair. Returns empty strings if unavailable.
     """
     if _openai_client is None:
-        return ""
+        return "", ""
     # Join all provided lines (one per request) into the prompt; do not silently cap them here
     joined = "\n".join(f"- {t}" for t in texts)
     dbg_print(f"[debug] Preparing LLM summary for {len(texts)} texts.\n"+joined)
 
     # Prefer a user-editable prompt template file; fallback to the inline prompt when not present
+    template = None
+    p = None
     try:
         from pathlib import Path
         p = Path(__file__).parent / "analysis.prompt"
         if p.exists():
             template = p.read_text(encoding="utf-8")
-            # If the template doesn't include a {joined} placeholder, append the sample block
-            if "{joined}" in template:
-                prompt = template.format(joined=joined)
-                dbg_print("[debug] analysis.prompt contains {joined}; used template with substitution.")
-            else:
-                prompt = template.rstrip() + "\n\nSample requests:\n" + joined
-                dbg_print("[debug] analysis.prompt missing {joined}; appended Sample requests block.")
-        else:
-            raise FileNotFoundError
     except Exception:
+        template = None
+
+    if template:
+        if "{joined}" in template:
+            base_prompt = template.format(joined=joined)
+            dbg_print("[debug] analysis.prompt contains {joined}; used template with substitution.")
+        else:
+            base_prompt = template.rstrip() + "\n\nSample requests:\n" + joined
+            dbg_print("[debug] analysis.prompt missing {joined}; appended Sample requests block.")
+    else:
         dbg_print("[debug] Analysis prompt file not found; using inline prompt.")
-        prompt = (
+        base_prompt = (
             "You are helping a company synthesize customer feedback.\n"
             "Given the sample requests below, write 2–4 sentences that:\n"
-            " \u2022 Explain the core concept that ties these elements together conceptually"
-            " Name the core pain point in plain language\n"
+            " \u2022 Explain the core concept that ties these elements together conceptually.\n"
+            " \u2022 Name the core pain point in plain language.\n"
             "These may arise from any industry, not just software.\n"
             "Be concise and non-marketing.\n\n"
             f"Sample requests:\n{joined}\n"
         )
-    # DEBUG: print the full prompt sent to the LLM when debug is enabled
-    dbg_print("[debug] Attempting to load analysis prompt from:", str(p))
+
+    # Ask the model to return JSON with title and summary
+    prompt = (
+        base_prompt
+        + "\n\nOutput format (JSON): "
+          '{"title": "<short title (max 8 words)>", '
+          '"summary": "<2-4 sentence summary>"}'
+    )
+
+    if p is not None:
+        dbg_print("[debug] Attempting to load analysis prompt from:", str(p))
     dbg_print("[debug] LLM prompt:\n" + prompt)
     dbg_print("[debug] LLM request sent")
 
@@ -292,9 +305,11 @@ def summarize_cluster_llm(texts: List[str]) -> str:
             ],
             temperature=0.2,
         )
-        return resp.choices[0].message.content.strip()
+        raw = resp.choices[0].message.content or ""
+        return _parse_llm_title_summary(str(raw))
     except Exception as e:
-        return f"(LLM summarization unavailable: {e})"
+        dbg_print(f"[debug] LLM error: {e}")
+        return "", ""
 
 
 def heuristic_summary(texts: List[str], top_terms: List[str]) -> str:
@@ -326,6 +341,35 @@ def heuristic_summary(texts: List[str], top_terms: List[str]) -> str:
 
 
 # ------------------------------- UTILITIES ----------------------------------
+def default_title_from_terms(terms: List[str]) -> str:
+    """Derive a short title from top terms if LLM title is unavailable."""
+    top = [t for t in terms][:3]
+    return ("Theme: " + ", ".join(top)) if top else "Theme"
+
+
+def _parse_llm_title_summary(text: str) -> Tuple[str, str]:
+    """Parse a JSON object with {"title", "summary"} from LLM text; fallback to first-line title."""
+    if not text:
+        return "", ""
+    # Try to parse JSON object anywhere in the response
+    try:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            obj = json.loads(text[start:end + 1])
+            title = str(obj.get("title", "")).strip()
+            summary = str(obj.get("summary", "")).strip()
+            if title or summary:
+                return title, summary
+    except Exception:
+        pass
+    # Fallback: first non-empty line is title, rest is summary
+    lines = [ln.strip() for ln in str(text).splitlines() if ln and ln.strip()]
+    if not lines:
+        return "", ""
+    title = lines[0].rstrip(":")
+    summary = "\n".join(lines[1:]).strip()
+    return title, summary
 def top_terms_for_cluster(texts: List[str], all_texts: List[str], n_terms: int = 8) -> List[str]:
     """
     Compute top distinguishing terms for a cluster via TF-IDF against the whole corpus.
@@ -505,12 +549,17 @@ def main():
         # For the LLM prompt, use only the raw request texts (not customer names)
         llm_request_texts = [r.get(text_col, "") for r in items_rows]
 
+        title = ""
+        summary = ""
         if _openai_client and vec_mode == "embeddings":
-            summary = summarize_cluster_llm(llm_request_texts)
-            if not summary:
-                summary = heuristic_summary(items, terms)
-        else:
+            try:
+                title, summary = summarize_cluster_llm(llm_request_texts)
+            except Exception:
+                title, summary = "", ""
+        if not summary:
             summary = heuristic_summary(items, terms)
+        if not title:
+            title = default_title_from_terms(terms)
 
         dbg(f"[debug] Cluster {ci} - items_count={len(items)}")
         for i, it in enumerate(items[:10]):  # limit output to first 10 items
@@ -518,20 +567,21 @@ def main():
         dbg(f"[debug] Cluster {ci} - top terms: {', '.join(terms)}")
         dbg(f"[debug] Cluster {ci} - summary: {summary}")
 
-        # Keep examples and summary; full-row data is available in items_rows for downstream API interactions
-        summaries.append((ci, len(items), terms, examples_fmt, summary, items_rows))
+        # Keep examples, title and summary; full-row data is available in items_rows for downstream API interactions
+        summaries.append((ci, len(items), terms, examples_fmt, summary, items_rows, title))
 
     # Debug: print summary/row counts so we can trace missing entries
     dbg(f"[debug] Preparing to write {len(summaries)} summaries to outputs")
-    for ci, count, terms, exs, summary, rows in summaries:
+    for ci, count, terms, exs, summary, rows, title in summaries:
         dbg(f"[debug] cluster {ci}: count={count}, exs_len={len(exs)}, rows_len={len(rows)}")
         for i, row in enumerate(rows[:5]):
             dbg(f"[debug]   sample row[{i}] text: {str(row.get(text_col, ''))[:200]}")
 
     # -------- Console Output --------
     dbg("\n=== Top Pain-Point Clusters ===")
-    for ci, count, terms, exs, summary, rows in summaries:
+    for ci, count, terms, exs, summary, rows, title in summaries:
         dbg(f"[Cluster {ci}] count={count}  key_terms={', '.join(terms[:6])}")
+        dbg(f"  title: {title}")
         # Print all preserved rows for visibility
         for row in rows:
             dbg(f"  - {format_example(row, text_col)}")
@@ -539,10 +589,10 @@ def main():
 
     # -------- CSV Output --------
     # pain_point_summary.csv with examples per row
-    max_examples = max((len(exs) for *_rest, exs, _sum, _rows in summaries), default=args.samples)
+    max_examples = max((len(exs) for *_rest, exs, _sum, _rows, _title in summaries), default=args.samples)
     cols = ["Cluster", "Count"] + [f"Example_{i+1}" for i in range(max_examples)]
     rows = []
-    for ci, count, _terms, exs, _summary, _rows in summaries:
+    for ci, count, _terms, exs, _summary, _rows, _title in summaries:
         row = [ci, count] + exs + [""] * (max_examples - len(exs))
         rows.append(row)
     pd.DataFrame(rows, columns=cols).to_csv("pain_point_summary.csv", index=False)
@@ -550,8 +600,10 @@ def main():
     # -------- Markdown Output --------
     md_lines = ["# Pain Points Summary\n"]
     md_lines.append(f"_Vectorization: {vec_mode}; clusters: {k}_\n")
-    for ci, count, terms, exs, summary, rows in summaries:
+    for ci, count, terms, exs, summary, rows, title in summaries:
         md_lines.append(f"## Cluster {ci} ({count})")
+        if title:
+            md_lines.append(f"**Title:** {title}")
         #md_lines.append(f"**Key terms:** {', '.join(terms)}")
         md_lines.append("")
         # Use the preserved full rows to list examples so we include every request
@@ -575,17 +627,20 @@ def main():
         "<html lang=\"en\">",
         "<head>",
         "  <meta charset=\"utf-8\" />",
-        "  <title>Pain Points Summary</title>",
-        "  <style>body{font-family:Arial,Helvetica,sans-serif;margin:2rem;background:#f7f7f9;color:#1a1a1a;}h1{margin-bottom:0.5rem;}section{background:#fff;border-radius:8px;padding:1.25rem;margin-bottom:1.5rem;box-shadow:0 2px 6px rgba(0,0,0,0.06);}section h2{margin-top:0;color:#0f4c81;}section .meta{color:#555;font-size:0.9rem;margin-bottom:0.75rem;}section ul{margin:0 0 1rem 1.25rem;padding:0;}section li{margin-bottom:0.5rem;}section .summary{font-weight:600;}footer{margin-top:2rem;font-size:0.85rem;color:#555;}</style>",
+        "  <title>ACME Pain Points Summary</title>",
+        "  <style>body{font-family:Arial,Helvetica,sans-serif;margin:2rem;background:#f7f7f9;color:#1a1a1a;}h1{margin-bottom:0.5rem;}section{background:#fff;border-radius:8px;padding:1.25rem;margin-bottom:1.5rem;box-shadow:0 2px 6px rgba(0,0,0,0.06);}section h2{margin-top:0;color:#0f4c81;}section .meta{color:#555;font-size:0.9rem;margin-bottom:0.75rem;}section ul{margin:0 0 1rem 1.25rem;padding:0;}section li{margin-bottom:0.5rem;}section .title{font-weight:600;}section .summary{font-weight:600;}footer{margin-top:2rem;font-size:0.85rem;color:#555;}</style>",
         "</head>",
         "<body>",
-        "  <h1>Pain Points Summary</h1>",
+        "  <h1>Acme Pain Points Summary</h1>",
         #f"  <div class=\"meta\">Vectorization: {escape(str(vec_mode))}; clusters: {k}</div>",
     ]
 
-    for ci, count, terms, exs, summary, rows in summaries:
+    for ci, count, terms, exs, summary, rows, title in summaries:
         html_lines.append("  <section>")
-        html_lines.append(f"    <h2>Cluster {ci} ({count})</h2>")
+        #html_lines.append(f"    <h2>Cluster {ci} ({count})</h2>")
+        if title:
+            #html_lines.append("    <div class=\"meta\"><strong>Title</strong></div>")
+            html_lines.append(f"    <p class=\"title\">{escape(title)}</p>")
         if rows:
             html_lines.append("    <div class=\"meta\"><strong>Examples</strong></div>")
             html_lines.append("    <ul>")
