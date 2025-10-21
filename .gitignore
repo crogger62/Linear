@@ -16,3 +16,4 @@ dist/
 *.csv
 *.xls
 *.xlsx
+~$*.xlsx
