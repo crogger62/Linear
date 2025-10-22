@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ACME Customer Request Analyzer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:1.5rem;background:#f7f7f9;color:#1a1a1a}
+    h1{margin:0 0 1rem 0}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem}
+    .card{background:#fff;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.06);padding:1rem}
+    .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem}
+    .list{max-height:380px;overflow:auto;border:1px solid #e3e3e7;border-radius:6px}
+    .row{display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;border-bottom:1px solid #eee}
+    .row:last-child{border-bottom:none}
+    .none{margin:0.5rem 0 1rem}
+    .actions{margin-top:1rem;display:flex;gap:0.75rem;align-items:center}
+    button{background:#0f62fe;color:#fff;border:none;border-radius:6px;padding:0.6rem 1rem;cursor:pointer}
+    button:disabled{background:#9bbcff;cursor:not-allowed}
+    input[type="search"]{width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:6px}
+    pre{background:#0d1117;color:#c9d1d9;border-radius:6px;padding:0.75rem;max-height:260px;overflow:auto}
+    .status{font-size:0.9rem;color:#555}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <h1>ACME Customer Request Analyzer</h1>
+  <div class="grid">
+    <section class="card">
+      <div class="header">
+        <h2 style="margin:0">Projects</h2>
+        <span id="projCount" class="status"></span>
+      </div>
+      <div id="projects" class="list"></div>
+    </section>
+    <section class="card">
+      <div class="header">
+        <h2 style="margin:0">Issues</h2>
+        <input id="issueSearch" type="search" placeholder="Search issues (TEAM-123 or title)" />
+      </div>
+      <div id="issues" class="list"></div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:1rem">
+    <div class="header">
+      <h2 style="margin:0">All Customer Records</h2>
+      <span class="status">Entire workspace</span>
+    </div>
+    <div id="workspace" class="list"></div>
+  </section>
+
+  <div class="actions">
+    <button id="runBtn">Analyze Customer Requests</button>
+    <span id="runStatus" class="status"></span>
+  </div>
+  <pre id="log"></pre>
+  <div id="insights" class="card" style="margin-top:1rem"></div>
+
+<script>
+const projectsEl = document.getElementById('projects');
+const issuesEl = document.getElementById('issues');
+const runBtn = document.getElementById('runBtn');
+const runStatus = document.getElementById('runStatus');
+const logEl = document.getElementById('log');
+const projCountEl = document.getElementById('projCount');
+const issueSearch = document.getElementById('issueSearch');
+const workspaceEl = document.getElementById('workspace');
+const insightsEl = document.getElementById('insights');
+
+function radioRow(name, value, label, dataset = {}){
+  const div = document.createElement('div');
+  div.className = 'row';
+  const input = document.createElement('input');
+  input.type = 'radio';
+  input.name = 'choice';
+  input.value = name;
+  for (const [k,v] of Object.entries(dataset)) input.dataset[k] = v;
+  const span = document.createElement('span');
+  span.textContent = label;
+  div.appendChild(input); div.appendChild(span);
+  return div;
+}
+
+async function loadProjects(){
+  const resp = await fetch('/api/projects');
+  const data = await resp.json();
+  projectsEl.innerHTML = '';
+  (data.projects || []).forEach(p => {
+    const row = radioRow('project', p.id, p.name, { id: p.id });
+    projectsEl.appendChild(row);
+  });
+  projCountEl.textContent = `${(data.projects || []).length} projects`;
+}
+
+async function loadIssues(query){
+  const url = new URL('/api/issues', location.origin);
+  if (query) url.searchParams.set('query', query);
+  url.searchParams.set('limit', '200');
+  const resp = await fetch(url);
+  const data = await resp.json();
+  issuesEl.innerHTML = '';
+  (data.issues || []).forEach(i => {
+    const label = `${i.identifier} — ${i.title || ''}`.trim();
+    const row = radioRow('issue', i.id, label, { id: i.id });
+    issuesEl.appendChild(row);
+  });
+}
+
+function getSelection(){
+  const selected = document.querySelector('input[name="choice"]:checked');
+  if (!selected) return { type: 'none' };
+  if (selected.value === 'project') return { type: 'project', id: selected.dataset.id };
+  if (selected.value === 'issue') return { type: 'issue', id: selected.dataset.id };
+  return { type: 'none' };
+}
+
+function appendLog(line){
+  logEl.textContent += line.endsWith('\n') ? line : (line + '\n');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function run(){
+  runBtn.disabled = true; runStatus.textContent = 'Starting…'; logEl.textContent = '';
+  insightsEl.innerHTML = '';
+  const sel = getSelection();
+  const resp = await fetch('/api/run', { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(sel) });
+  if (!resp.ok){ runStatus.textContent = 'Failed to start run'; runBtn.disabled = false; return; }
+  const { runId } = await resp.json();
+  runStatus.textContent = `Running (runId=${runId})…`;
+  const es = new EventSource(`/run-events?runId=${encodeURIComponent(runId)}`);
+  es.addEventListener('hello', () => {});
+  es.addEventListener('run', (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      if (data.status === 'started') appendLog(`$ ${data.cmd}`);
+      if (data.stream === 'stdout' || data.stream === 'stderr') appendLog(String(data.line || ''));
+      if (data.status === 'finished'){
+        appendLog(`\nExit code: ${data.code}`);
+        runStatus.textContent = 'Export finished';
+        es.close();
+        // Chain analysis automatically only on success
+        if (Number(data.code) === 0) {
+          runAnalysisAndDisplay();
+        } else {
+          runBtn.disabled = false;
+        }
+      }
+      if (data.status === 'error'){
+        appendLog(`Error: ${data.message}`);
+        runStatus.textContent = 'Error';
+        es.close();
+        runBtn.disabled = false;
+      }
+    } catch {}
+  });
+}
+
+issueSearch.addEventListener('input', (e) => {
+  const q = e.target.value.trim();
+  loadIssues(q);
+});
+
+
+
+runBtn.addEventListener('click', run);
+
+async function runAnalysisAndDisplay(){
+  runStatus.textContent = 'Analyzing…';
+  const resp = await fetch('/api/analyze', { method:'POST' });
+  if (!resp.ok){ runStatus.textContent = 'Failed to start analysis'; runBtn.disabled = false; return; }
+  const { runId } = await resp.json();
+  runStatus.textContent = `Analyzing (runId=${runId})…`;
+  const es = new EventSource(`/run-events?runId=${encodeURIComponent(runId)}`);
+  es.addEventListener('hello', () => {});
+  es.addEventListener('run', async (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      if (data.status === 'started') appendLog(`$ ${data.cmd}`);
+      if (data.stream === 'stdout' || data.stream === 'stderr') appendLog(String(data.line || ''));
+      if (data.status === 'finished'){
+        appendLog(`\nAnalysis exit code: ${data.code}`);
+        es.close();
+        if (Number(data.code) !== 0) {
+          // Failure: show explicit error message and ensure no stale content remains
+          runStatus.textContent = 'Error Processing';
+          insightsEl.innerHTML = '';
+          runBtn.disabled = false;
+          return;
+        }
+        runStatus.textContent = 'Analysis finished';
+        // Attempt to load insights.html and append
+        try {
+          const r = await fetch('/api/insights');
+          if (r.ok){
+            const html = await r.text();
+            insightsEl.innerHTML = html;
+          } else {
+            appendLog('Could not load insights.html');
+          }
+        } catch (e) {
+          appendLog('Error loading insights.html: ' + (e && e.message ? e.message : String(e)));
+        }
+        runBtn.disabled = false;
+      }
+      if (data.status === 'error'){
+        appendLog(`Error: ${data.message}`);
+        runStatus.textContent = 'Error Processing';
+        insightsEl.innerHTML = '';
+        es.close();
+        runBtn.disabled = false;
+      }
+    } catch {}
+  });
+}
+
+loadProjects();
+loadIssues();
+
+function renderWorkspaceSelector(){
+  workspaceEl.innerHTML = '';
+  const row = radioRow('none', 'workspace', 'All customer records (entire workspace)');
+  const input = row.querySelector('input');
+  if (input) input.checked = true; // default selection
+  workspaceEl.appendChild(row);
+}
+
+renderWorkspaceSelector();
+</script>
+</body>
+</html>
