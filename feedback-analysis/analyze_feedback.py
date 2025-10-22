@@ -243,12 +243,13 @@ def cluster_texts(X: np.ndarray, k: int, sample_weight: Optional[np.ndarray] = N
 
 
 # ---------------------------- SUMMARIZATION ---------------------------------
-def summarize_cluster_llm(texts: List[str]) -> Tuple[str, str]:
+def summarize_cluster_llm(texts: List[str]) -> Tuple[str, str, str]:
     """
-    Use an LLM to generate a (title, summary) pair. Returns empty strings if unavailable.
+    Use an LLM to generate a (title, summary, representative) triple. Returns empty strings if unavailable.
+    representative should be one exact request from the provided texts.
     """
     if _openai_client is None:
-        return "", ""
+        return "", "", ""
     # Join all provided lines (one per request) into the prompt; do not silently cap them here
     joined = "\n".join(f"- {t}" for t in texts)
     dbg_print(f"[debug] Preparing LLM summary for {len(texts)} texts.\n"+joined)
@@ -283,12 +284,14 @@ def summarize_cluster_llm(texts: List[str]) -> Tuple[str, str]:
             f"Sample requests:\n{joined}\n"
         )
 
-    # Ask the model to return JSON with title and summary
+        # Ask the model to return JSON with title, summary, and a single most-representative request
     prompt = (
         base_prompt
-        + "\n\nOutput format (JSON): "
-          '{"title": "<short title (max 8 words)>", '
-          '"summary": "<2-4 sentence summary>"}'
+                + "\n\nPlease also pick one exact request from the samples that best represents the cluster."
+                + "\n\nOutput format (JSON): "
+                    '{"title": "<short title (max 8 words)>", '
+                    '"summary": "<2-4 sentence summary>", '
+                    '"representative": "<paste one exact line from the sample requests>"}'
     )
 
     if p is not None:
@@ -309,7 +312,7 @@ def summarize_cluster_llm(texts: List[str]) -> Tuple[str, str]:
         return _parse_llm_title_summary(str(raw))
     except Exception as e:
         dbg_print(f"[debug] LLM error: {e}")
-        return "", ""
+        return "", "", ""
 
 
 def heuristic_summary(texts: List[str], top_terms: List[str]) -> str:
@@ -347,10 +350,10 @@ def default_title_from_terms(terms: List[str]) -> str:
     return ("Theme: " + ", ".join(top)) if top else "Theme"
 
 
-def _parse_llm_title_summary(text: str) -> Tuple[str, str]:
-    """Parse a JSON object with {"title", "summary"} from LLM text; fallback to first-line title."""
+def _parse_llm_title_summary(text: str) -> Tuple[str, str, str]:
+    """Parse a JSON object with {"title", "summary", "representative"} from LLM text; fallback to first-line title."""
     if not text:
-        return "", ""
+        return "", "", ""
     # Try to parse JSON object anywhere in the response
     try:
         start = text.find("{")
@@ -359,17 +362,18 @@ def _parse_llm_title_summary(text: str) -> Tuple[str, str]:
             obj = json.loads(text[start:end + 1])
             title = str(obj.get("title", "")).strip()
             summary = str(obj.get("summary", "")).strip()
-            if title or summary:
-                return title, summary
+            representative = str(obj.get("representative", "")).strip()
+            if title or summary or representative:
+                return title, summary, representative
     except Exception:
         pass
     # Fallback: first non-empty line is title, rest is summary
     lines = [ln.strip() for ln in str(text).splitlines() if ln and ln.strip()]
     if not lines:
-        return "", ""
+        return "", "", ""
     title = lines[0].rstrip(":")
     summary = "\n".join(lines[1:]).strip()
-    return title, summary
+    return title, summary, ""
 def top_terms_for_cluster(texts: List[str], all_texts: List[str], n_terms: int = 8) -> List[str]:
     """
     Compute top distinguishing terms for a cluster via TF-IDF against the whole corpus.
@@ -551,15 +555,22 @@ def main():
 
         title = ""
         summary = ""
+        representative = ""
         if _openai_client and vec_mode == "embeddings":
             try:
-                title, summary = summarize_cluster_llm(llm_request_texts)
+                title, summary, representative = summarize_cluster_llm(llm_request_texts)
             except Exception:
-                title, summary = "", ""
+                title, summary, representative = "", "", ""
         if not summary:
             summary = heuristic_summary(items, terms)
         if not title:
             title = default_title_from_terms(terms)
+        if not representative:
+            # Heuristic fallback: pick a short, common example from the cluster raw texts
+            try:
+                representative = pick_examples(items, 1)[0]
+            except Exception:
+                representative = items[0] if items else ""
 
         dbg(f"[debug] Cluster {ci} - items_count={len(items)}")
         for i, it in enumerate(items[:10]):  # limit output to first 10 items
@@ -568,20 +579,22 @@ def main():
         dbg(f"[debug] Cluster {ci} - summary: {summary}")
 
         # Keep examples, title and summary; full-row data is available in items_rows for downstream API interactions
-        summaries.append((ci, len(items), terms, examples_fmt, summary, items_rows, title))
+        summaries.append((ci, len(items), terms, examples_fmt, summary, items_rows, title, representative))
 
     # Debug: print summary/row counts so we can trace missing entries
     dbg(f"[debug] Preparing to write {len(summaries)} summaries to outputs")
-    for ci, count, terms, exs, summary, rows, title in summaries:
+    for ci, count, terms, exs, summary, rows, title, representative in summaries:
         dbg(f"[debug] cluster {ci}: count={count}, exs_len={len(exs)}, rows_len={len(rows)}")
         for i, row in enumerate(rows[:5]):
             dbg(f"[debug]   sample row[{i}] text: {str(row.get(text_col, ''))[:200]}")
 
     # -------- Console Output --------
     dbg("\n=== Top Pain-Point Clusters ===")
-    for ci, count, terms, exs, summary, rows, title in summaries:
+    for ci, count, terms, exs, summary, rows, title, representative in summaries:
         dbg(f"[Cluster {ci}] count={count}  key_terms={', '.join(terms[:6])}")
         dbg(f"  title: {title}")
+        if representative:
+            dbg(f"  representative: {representative}")
         # Print all preserved rows for visibility
         for row in rows:
             dbg(f"  - {format_example(row, text_col)}")
@@ -589,10 +602,11 @@ def main():
 
     # -------- CSV Output --------
     # pain_point_summary.csv with examples per row
-    max_examples = max((len(exs) for *_rest, exs, _sum, _rows, _title in summaries), default=args.samples)
+    # exs is at index 3 in our tuple structure
+    max_examples = max((len(t[3]) for t in summaries), default=args.samples)
     cols = ["Cluster", "Count"] + [f"Example_{i+1}" for i in range(max_examples)]
     rows = []
-    for ci, count, _terms, exs, _summary, _rows, _title in summaries:
+    for ci, count, _terms, exs, _summary, _rows, _title, _rep in summaries:
         row = [ci, count] + exs + [""] * (max_examples - len(exs))
         rows.append(row)
     pd.DataFrame(rows, columns=cols).to_csv("pain_point_summary.csv", index=False)
@@ -600,10 +614,12 @@ def main():
     # -------- Markdown Output --------
     md_lines = ["# Pain Points Summary\n"]
     md_lines.append(f"_Vectorization: {vec_mode}; clusters: {k}_\n")
-    for ci, count, terms, exs, summary, rows, title in summaries:
-        md_lines.append(f"## Cluster {ci} ({count})")
+    for idx, (ci, count, terms, exs, summary, rows, title, representative) in enumerate(summaries, start=1):
+        md_lines.append(f"## Cluster {idx} ({count})")
         if title:
-            md_lines.append(f"**Title:** {title}")
+            md_lines.append(f"**{title}**")
+        if representative:
+            md_lines.append(f"_Representative:_ {representative}")
         #md_lines.append(f"**Key terms:** {', '.join(terms)}")
         md_lines.append("")
         # Use the preserved full rows to list examples so we include every request
@@ -628,25 +644,29 @@ def main():
         "<head>",
         "  <meta charset=\"utf-8\" />",
         "  <title>ACME Pain Points Summary</title>",
-        "  <style>body{font-family:Arial,Helvetica,sans-serif;margin:2rem;background:#f7f7f9;color:#1a1a1a;}h1{margin-bottom:0.5rem;}section{background:#fff;border-radius:8px;padding:1.25rem;margin-bottom:1.5rem;box-shadow:0 2px 6px rgba(0,0,0,0.06);}section h2{margin-top:0;color:#0f4c81;}section .meta{color:#555;font-size:0.9rem;margin-bottom:0.75rem;}section ul{margin:0 0 1rem 1.25rem;padding:0;}section li{margin-bottom:0.5rem;}section .title{font-weight:600;}section .summary{font-weight:600;}footer{margin-top:2rem;font-size:0.85rem;color:#555;}</style>",
+    "  <style>body{font-family:Arial,Helvetica,sans-serif;margin:2rem;background:#f7f7f9;color:#1a1a1a;}h1{margin-bottom:0.5rem;}section{background:#fff;border-radius:8px;padding:1.25rem;margin-bottom:1.5rem;box-shadow:0 2px 6px rgba(0,0,0,0.06);}section h2{margin-top:0;color:#0f4c81;}section .meta{color:#555;font-size:0.9rem;margin-bottom:0.75rem;}section ul{margin:0 0 1rem 1.25rem;padding:0;}section li{margin-bottom:0.5rem;}section .title{font-weight:600;}section .summary{font-weight:600;} .blue{color:#0f4c81;} hr.sep{border:0;border-top:1px solid #dcdcdc;margin:1rem 0 1.25rem;} footer{margin-top:2rem;font-size:0.85rem;color:#555;}</style>",
         "</head>",
         "<body>",
         "  <h1>Acme Pain Points Summary</h1>",
         #f"  <div class=\"meta\">Vectorization: {escape(str(vec_mode))}; clusters: {k}</div>",
     ]
 
-    for ci, count, terms, exs, summary, rows, title in summaries:
+    for idx, (ci, count, terms, exs, summary, rows, title, representative) in enumerate(summaries, start=1):
         html_lines.append("  <section>")
         #html_lines.append(f"    <h2>Cluster {ci} ({count})</h2>")
+        if idx >= 2:
+            html_lines.append("    <hr style=\"border:0;border-top:1px solid #dcdcdc;margin:1rem 0 1.25rem;\" />")
         if title:
-            #html_lines.append("    <div class=\"meta\"><strong>Title</strong></div>")
-            html_lines.append(f"    <p class=\"title\">{escape(title)}</p>")
+            # Prefix with 1-based index and bold the number and title text
+            html_lines.append(f"    <p class=\"title\"><strong>{idx}.</strong> <strong>{escape(title)}</strong></p>")
+        if representative:
+            html_lines.append(f"    <p class=\"representative\"><span style=\"color:#0f4c81\"><strong>Representative Customer Requests:</strong></span> <em>{escape(representative)}</em></p>")
         # Move Summary above Examples
-        html_lines.append("    <div class=\"meta\"><strong>Summary</strong></div>")
+        html_lines.append("    <div class=\"meta\"><strong style=\"color:#0f4c81\">Summary</strong></div>")
         summary_text = summary if summary else "(no summary)"
         html_lines.append(f"    <p class=\"summary\">{escape(summary_text)}</p>")
         if rows:
-            html_lines.append("    <div class=\"meta\"><strong>Examples</strong></div>")
+            html_lines.append("    <div class=\"meta\"><strong style=\"color:#0f4c81\">Examples</strong></div>")
             html_lines.append("    <ul>")
             for row in rows:
                 try:

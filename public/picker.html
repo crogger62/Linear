@@ -7,6 +7,7 @@
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:1.5rem;background:#f7f7f9;color:#1a1a1a}
     h1{margin:0 0 1rem 0}
+    h1 .brand-logo{height:28px;margin-left:10px;vertical-align:middle}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem}
     .card{background:#fff;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.06);padding:1rem}
     .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem}
@@ -24,7 +25,7 @@
   </style>
 </head>
 <body>
-  <h1>ACME Customer Request Analyzer</h1>
+  <h1>ACME Customer Request Analyzer </h1>
   <div class="grid">
     <section class="card">
       <div class="header">
@@ -194,7 +195,14 @@ async function runAnalysisAndDisplay(){
           const r = await fetch('/api/insights');
           if (r.ok){
             const html = await r.text();
-            insightsEl.innerHTML = html;
+            // Parse full HTML and inject only the <body> contents to avoid nesting a full document
+            try {
+              const parser = new DOMParser();
+              const doc = parser.parseFromString(html, 'text/html');
+              insightsEl.innerHTML = doc?.body ? doc.body.innerHTML : html;
+            } catch {
+              insightsEl.innerHTML = html;
+            }
           } else {
             appendLog('Could not load insights.html');
           }
