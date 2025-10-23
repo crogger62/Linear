@@ -1,0 +1,5 @@
+pandas>=2.0
+numpy>=1.24
+scikit-learn>=1.3
+# Optional: enables LLM titles/summaries if OPENAI_API_KEY is set
+openai>=1.0.0

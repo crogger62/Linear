@@ -4,7 +4,11 @@
     "start": "ts-node src/me.ts",
     "me": "ts-node src/me.ts",
     "teams": "ts-node src/teams.ts",
-    "issue:create": "ts-node src/createIssue.ts"
+    "issue:create": "ts-node src/createIssue.ts",
+    "picker": "ts-node src/customerRequests-server.ts",
+    "dev": "ts-node src/customerRequests-server.ts",
+    "export": "ts-node src/customerRequests.ts",
+    "analyze": "bash -lc ./run_analysis.sh"
   },
   "dependencies": {
     "body-parser": "^2.2.0",
