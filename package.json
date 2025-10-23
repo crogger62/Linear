@@ -8,11 +8,14 @@
     "picker": "ts-node src/customerRequests-server.ts",
     "dev": "ts-node src/customerRequests-server.ts",
     "export": "ts-node src/customerRequests.ts",
-    "analyze": "bash -lc ./run_analysis.sh"
+    "analyze": "bash -lc ./run_analysis.sh",
+    "start:dist": "node dist/customerRequests-server.js"
   },
   "dependencies": {
     "body-parser": "^2.2.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "dotenv": "^16.4.5",
+    "@linear/sdk": "^31.0.0"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",
