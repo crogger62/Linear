@@ -24,6 +24,7 @@ import sys
 import math
 import argparse
 import json
+import warnings
 from html import escape
 from typing import List, Tuple, Optional
 
@@ -32,6 +33,9 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.feature_extraction.text import TfidfVectorizer
+
+# Suppress sklearn numerical warnings that occur with edge-case data
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="sklearn")
 
 # Module-level debug flag and simple printer so summarize_cluster_llm can print the prompt
 DEBUG = False
@@ -159,15 +163,59 @@ def vectorize_texts_tfidf(texts: List[str]) -> np.ndarray:
     """
     TF-IDF fallback when OpenAI isn't available.
     """
-    vec = TfidfVectorizer(
-        ngram_range=(1, 2),
-        min_df=1,
-        max_df=0.95,
-        strip_accents="unicode"
-    )
-    X = vec.fit_transform(texts)
-    # Return dense for KMeans; for large corpora consider MiniBatchKMeans with sparse
-    return X.toarray()
+    # Filter out empty texts
+    non_empty = [t for t in texts if t and t.strip()]
+    if not non_empty:
+        raise ValueError("No non-empty texts to vectorize.")
+    if len(non_empty) < len(texts):
+        print(f"[warn] Filtered out {len(texts) - len(non_empty)} empty texts before vectorization.")
+    
+    # Try with default parameters first
+    try:
+        vec = TfidfVectorizer(
+            ngram_range=(1, 2),
+            min_df=1,
+            max_df=0.95,
+            strip_accents="unicode"
+        )
+        X = vec.fit_transform(non_empty)
+    except ValueError as e:
+        if "no terms remain" in str(e):
+            # If all terms filtered out, try more lenient parameters
+            print(f"[warn] Default TF-IDF parameters filtered all terms. Trying more lenient settings...")
+            vec = TfidfVectorizer(
+                ngram_range=(1, 2),
+                min_df=1,
+                max_df=0.99,  # More lenient: allow terms that appear in up to 99% of docs
+                strip_accents="unicode"
+            )
+            try:
+                X = vec.fit_transform(non_empty)
+            except ValueError:
+                # Last resort: remove max_df entirely and use only min_df
+                print(f"[warn] Still filtering all terms. Using most lenient settings...")
+                vec = TfidfVectorizer(
+                    ngram_range=(1, 2),
+                    min_df=1,
+                    strip_accents="unicode"
+                )
+                X = vec.fit_transform(non_empty)
+        else:
+            raise
+    
+    # Convert to dense array and clean any NaN/inf values
+    X_dense = X.toarray()
+    
+    # Replace NaN and inf with 0 to prevent numerical issues in clustering
+    if np.any(~np.isfinite(X_dense)):
+        nan_count = np.sum(~np.isfinite(X_dense))
+        print(f"[warn] Found {nan_count} non-finite values in TF-IDF matrix, replacing with 0")
+        X_dense = np.nan_to_num(X_dense, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    # Ensure no negative values (shouldn't happen with TF-IDF, but be safe)
+    X_dense = np.maximum(X_dense, 0.0)
+    
+    return X_dense
 
 
 # ------------------------------ CLUSTERING ----------------------------------
@@ -176,19 +224,25 @@ def choose_k_auto(X: np.ndarray, k_min: int, k_max: int) -> int:
     Auto-select K using silhouette score within [k_min, k_max].
     Requires >= (k_max) samples; otherwise clamps to feasible range.
     """
+    # Validate and clean input matrix
+    if np.any(~np.isfinite(X)):
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    
     n = X.shape[0]
     k_max_eff = max(k_min, min(k_max, n - 1))  # silhouette needs at least k < n
     best_k, best_score = k_min, -1.0
     for k in range(k_min, k_max_eff + 1):
         try:
-            km = KMeans(n_clusters=k, n_init="auto", random_state=42).fit(X)
-            labels = km.labels_
-            # Silhouette score is undefined for 1 cluster or when any cluster has 1 sample
-            if len(set(labels)) < 2 or any((labels == c).sum() <= 1 for c in set(labels)):
-                continue
-            score = silhouette_score(X, labels, metric="euclidean")
-            if score > best_score:
-                best_k, best_score = k, score
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                km = KMeans(n_clusters=k, n_init="auto", random_state=42).fit(X)
+                labels = km.labels_
+                # Silhouette score is undefined for 1 cluster or when any cluster has 1 sample
+                if len(set(labels)) < 2 or any((labels == c).sum() <= 1 for c in set(labels)):
+                    continue
+                score = silhouette_score(X, labels, metric="euclidean")
+                if score > best_score:
+                    best_k, best_score = k, score
         except Exception:
             # On any numerical issues, skip
             continue
@@ -234,11 +288,17 @@ def compute_weights(priorities: List[str], revenues: List[float], sizes: List[fl
 
 
 def cluster_texts(X: np.ndarray, k: int, sample_weight: Optional[np.ndarray] = None) -> Tuple[np.ndarray, KMeans]:
-    km = KMeans(n_clusters=k, n_init="auto", random_state=42)
-    if sample_weight is not None:
-        km.fit(X, sample_weight=sample_weight)
-    else:
-        km.fit(X)
+    # Validate and clean input matrix
+    if np.any(~np.isfinite(X)):
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        km = KMeans(n_clusters=k, n_init="auto", random_state=42)
+        if sample_weight is not None:
+            km.fit(X, sample_weight=sample_weight)
+        else:
+            km.fit(X)
     return km.labels_, km
 
 
@@ -378,20 +438,42 @@ def top_terms_for_cluster(texts: List[str], all_texts: List[str], n_terms: int =
     """
     Compute top distinguishing terms for a cluster via TF-IDF against the whole corpus.
     """
+    # Filter empty texts
+    all_texts_clean = [t for t in all_texts if t and t.strip()]
+    texts_clean = [t for t in texts if t and t.strip()]
+    
+    if not all_texts_clean or not texts_clean:
+        return []
+    
+    # Use more lenient parameters to avoid filtering all terms
     vec = TfidfVectorizer(
         ngram_range=(1, 2),
         min_df=1,
-        max_df=0.95,
+        max_df=0.99,  # More lenient than 0.95
         strip_accents="unicode"
     )
-    # Fit on all texts; transform cluster texts
-    vec.fit(all_texts)
-    Xc = vec.transform(texts)
-    # Average TF-IDF for this cluster
-    mean_scores = np.asarray(Xc.mean(axis=0)).ravel()
-    terms = np.array(vec.get_feature_names_out())
-    idx = mean_scores.argsort()[::-1]
-    return terms[idx][:n_terms].tolist()
+    try:
+        # Fit on all texts; transform cluster texts
+        vec.fit(all_texts_clean)
+        Xc = vec.transform(texts_clean)
+        # Average TF-IDF for this cluster
+        mean_scores = np.asarray(Xc.mean(axis=0)).ravel()
+        terms = np.array(vec.get_feature_names_out())
+        idx = mean_scores.argsort()[::-1]
+        return terms[idx][:n_terms].tolist()
+    except ValueError:
+        # Fallback: try without max_df if still filtering all terms
+        vec = TfidfVectorizer(
+            ngram_range=(1, 2),
+            min_df=1,
+            strip_accents="unicode"
+        )
+        vec.fit(all_texts_clean)
+        Xc = vec.transform(texts_clean)
+        mean_scores = np.asarray(Xc.mean(axis=0)).ravel()
+        terms = np.array(vec.get_feature_names_out())
+        idx = mean_scores.argsort()[::-1]
+        return terms[idx][:n_terms].tolist()
 
 
 def pick_examples(texts: List[str], k: int) -> List[str]:

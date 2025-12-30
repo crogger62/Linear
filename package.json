@@ -3,6 +3,7 @@
     "build": "tsc",
     "start": "ts-node src/me.ts",
     "me": "ts-node src/me.ts",
+    "my-issues": "ts-node src/myIssues.ts",
     "teams": "ts-node src/teams.ts",
     "issue:create": "ts-node src/createIssue.ts",
     "picker": "ts-node src/customerRequests-server.ts",

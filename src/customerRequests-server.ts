@@ -54,9 +54,9 @@ async function paginate<T>(
 app.get("/api/projects", async (_req: Request, res: Response) => {
   try {
     const projects = await paginate<Project>((after) => linear.projects({ first: 50, after }));
-    res.json({
-      projects: projects.map((p) => ({ id: p.id, name: p.name ?? "(Unnamed Project)" })),
-    });
+    const mapped = projects.map((p) => ({ id: p.id, name: p.name ?? "(Unnamed Project)" }));
+    mapped.sort((a, b) => a.name.localeCompare(b.name));
+    res.json({ projects: mapped });
   } catch (err) {
     console.error("/api/projects error:", err);
     res.status(500).json({ error: "Failed to fetch projects" });
