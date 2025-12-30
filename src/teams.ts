@@ -118,7 +118,13 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error("[FATAL ERROR] Script failed:", e);
+  console.error("[DEBUG] Error type:", e?.constructor?.name || typeof e);
+  console.error("[DEBUG] Error message:", e instanceof Error ? e.message : String(e));
+  if (e instanceof Error && e.stack) {
+    console.error("[DEBUG] Full stack trace:");
+    console.error(e.stack);
+  }
   process.exit(1);
 });
 

@@ -116,7 +116,7 @@ async function mapLimit<T, R>(
 
 /**
  * Fetch all OPEN issues:
- *   completedAt == null, canceledAt == null, archivedAt == null
+ *   completedAt == null, canceledAt == null, archivedAt == null (filtered after fetch)
  * Then update related fields (state, project, team, assignee) with capped concurrency.
  */
 async function fetchOpenIssues(client: LinearClient): Promise<IssueLite[]> {
@@ -124,9 +124,12 @@ async function fetchOpenIssues(client: LinearClient): Promise<IssueLite[]> {
     client.issues({
       first: 50,
       after,
-      filter: { completedAt: { null: true }, canceledAt: { null: true }, archivedAt: { null: true } },
+      filter: { completedAt: { null: true }, canceledAt: { null: true } },
     })
   );
+
+  // Filter out archived issues (archivedAt is not available in IssueFilter type, so we filter after fetching)
+  const openIssues = rawIssues.filter(issue => !issue.archivedAt);
 
   const CONCURRENCY = 10;   // how many related entities to fetch at once
 
@@ -134,7 +137,7 @@ async function fetchOpenIssues(client: LinearClient): Promise<IssueLite[]> {
    * When one task finishes, it immediately starts the next, keeping that concurrency limit constant.
    * It returns a promise that resolves to all results once every item has been processed.
    */
-  const lites = await mapLimit(rawIssues, CONCURRENCY, async (issue) => {
+  const lites = await mapLimit(openIssues, CONCURRENCY, async (issue) => {
     // Name the promises first to avoid quirky tuple inference in older TS
     const pState = issue.state;
     const pProject = issue.project;
