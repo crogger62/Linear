@@ -24,12 +24,37 @@ import path from "path";
 import { LinearClient, Issue, Project } from "@linear/sdk";
 import { spawn } from "node:child_process";
 
-const API_KEY = process.env.LINEAR_API_KEY;
-if (!API_KEY) throw new Error("Missing LINEAR_API_KEY in .env");
+/**
+ * Deterministic key handling:
+ * - trims whitespace / CRLF / trailing newlines
+ * - fails fast if missing/empty
+ * - avoids module-scope client construction (prevents accidental "poisoned" clients)
+ *
+ * Also ensures child processes inherit a normalized key.
+ */
+function getLinearApiKey(): string {
+  const raw = process.env.LINEAR_API_KEY ?? "";
+  const apiKey = raw.trim();
+
+  if (!apiKey) {
+    throw new Error("Missing or empty LINEAR_API_KEY after trim (check your .env).");
+  }
+
+  // Normalize process.env so any spawned children inherit a clean value.
+  process.env.LINEAR_API_KEY = apiKey;
+  return apiKey;
+}
+
+function getLinearClient(): LinearClient {
+  const apiKey = getLinearApiKey();
+  return new LinearClient({ apiKey });
+}
 
 const app = express();
 const PORT = process.env.PICKER_PORT ? Number(process.env.PICKER_PORT) : 3100;
-const linear = new LinearClient({ apiKey: API_KEY });
+
+// Construct client after key normalization/validation
+const linear = getLinearClient();
 
 // Serve static files from ./public (picker.html lives here)
 app.use(express.static(path.join(process.cwd(), "public")));
@@ -37,7 +62,10 @@ app.use(bodyParser.json());
 
 // Simple paginator helper matching repo style
 async function paginate<T>(
-  fetch: (after?: string | null) => Promise<{ nodes: T[]; pageInfo: { hasNextPage: boolean; endCursor?: string | null } }>
+  fetch: (after?: string | null) => Promise<{
+    nodes: T[];
+    pageInfo: { hasNextPage: boolean; endCursor?: string | null };
+  }>
 ): Promise<T[]> {
   const out: T[] = [];
   let after: string | null | undefined = null;
@@ -74,7 +102,11 @@ app.get("/api/issues", async (req: Request, res: Response) => {
       const teamKey = identMatch[1].toUpperCase();
       const issueNumber = parseInt(identMatch[2], 10);
       const nodes = await paginate<Issue>((after) =>
-        linear.issues({ first: 50, after, filter: { number: { eq: issueNumber }, team: { key: { eq: teamKey } } } })
+        linear.issues({
+          first: 50,
+          after,
+          filter: { number: { eq: issueNumber }, team: { key: { eq: teamKey } } },
+        })
       );
       const items = nodes.slice(0, limit).map((i) => ({ id: i.id, identifier: i.identifier, title: i.title ?? "" }));
       return res.json({ issues: items });
@@ -154,8 +186,11 @@ app.post("/api/run", async (req: Request, res: Response) => {
     if (type === "project") args.push("--project-id", id!);
     else if (type === "issue") args.push("--issue-id", id!);
 
+    // Ensure child inherits normalized key (and keep rest of env intact)
+    const childEnv = { ...process.env, LINEAR_API_KEY: getLinearApiKey() };
+
     // Use npx so ts-node is resolved similarly to CLI usage
-    const child = spawn("npx", args, { cwd: process.cwd(), env: process.env });
+    const child = spawn("npx", args, { cwd: process.cwd(), env: childEnv });
     emitRun(runId, { status: "started", cmd: `npx ${args.join(" ")}` });
 
     child.stdout.on("data", (buf) => emitRun(runId, { stream: "stdout", line: buf.toString("utf8") }));
@@ -171,14 +206,16 @@ app.post("/api/run", async (req: Request, res: Response) => {
 // Run analysis command (defaults to analyze_feedback.py on CustomerRequests.csv)
 app.post("/api/analyze", async (_req: Request, res: Response) => {
   try {
-    // Execute bash shell script in current directory
     const cmd = "bash";
     const args = ["-lc", "./run_analysis.sh"];
 
     const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     res.status(202).json({ runId });
 
-    const child = spawn(cmd, args, { cwd: process.cwd(), env: process.env });
+    // Ensure child inherits normalized key (and keep rest of env intact)
+    const childEnv = { ...process.env, LINEAR_API_KEY: getLinearApiKey() };
+
+    const child = spawn(cmd, args, { cwd: process.cwd(), env: childEnv });
     emitRun(runId, { status: "started", cmd: `${cmd} ${args.join(" ")}` });
 
     child.stdout.on("data", (buf) => emitRun(runId, { stream: "stdout", line: buf.toString("utf8") }));
@@ -212,6 +249,8 @@ app.get("/api/insights", async (_req: Request, res: Response) => {
 app.get("/", (_req, res) => res.send("Customer Requests picker server up"));
 
 app.listen(PORT, () => {
-  console.log(`🚀 Picker listening on http://localhost:${PORT}`);
-  console.log(`   Open http://localhost:${PORT}/picker.html`);
+  console.log(`Picker listening on http://localhost:${PORT}`);
+  console.log(`Open http://localhost:${PORT}/picker.html`);
 });
+
+

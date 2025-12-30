@@ -15,17 +15,21 @@
 import "dotenv/config";
 import { LinearClient } from "@linear/sdk";
 
-// cross-fetch polyfill (Node 18+ usually fine, but safe to include)
-// import fetch from "cross-fetch";          // Uncomment this and the next line if cross-fetch not in your node version
-//(globalThis as any).fetch ??= fetch;
+function getLinearClient() {
+  const raw = process.env.LINEAR_API_KEY ?? "";
+  const apiKey = raw.trim();  // normalize
 
-const apiKey = process.env.LINEAR_API_KEY;  // get the key
-if (!apiKey) throw new Error("Missing LINEAR_API_KEY in .env");
+  if (!apiKey) {
+    throw new Error("Missing or empty LINEAR_API_KEY after trim");
+  }
 
-const client = new LinearClient({ apiKey });
+  return new LinearClient({ apiKey });
+}
 
 async function main() {
-  const me = await client.viewer;   //easy-peasy
+  const client = getLinearClient(); // construct AFTER validation
+
+  const me = await client.viewer;
   console.log({ id: me.id, name: me.name, email: me.email });
 }
 
@@ -33,5 +37,6 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+
 
 

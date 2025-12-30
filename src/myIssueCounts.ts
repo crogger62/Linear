@@ -2,28 +2,39 @@
  * myIssueCounts.ts
  * --------------
  * Quick use of API to obtain number of issues assigned to the user
- * 
+ *
  * Co-generated Craig Lewis & Chatgpt
  *
  * Usage:
  *   npx ts-node src/myIssueCounts.ts
  *   npx ts-node src/myIssueCounts.ts --include-archived
- * 
- *   Requires Linear API key in .env file
+ *
+ * Requires Linear API key in .env file
  */
 
 import "dotenv/config";
 import { LinearClient } from "@linear/sdk";
 
 // Uncomment next two lines if your Node version lacks global fetch
-//import fetch from "cross-fetch";   // 3) Polyfill fetch for Node environments (SDK expects global fetch).
-//(globalThis as any).fetch ??= fetch; // 4) Provide fetch globally if it's not already present.
+// import fetch from "cross-fetch";
+// (globalThis as any).fetch ??= fetch;
 
+/**
+ * Deterministic key handling:
+ * - trims whitespace / CRLF / trailing newlines
+ * - fails fast if missing/empty
+ * - avoids module-scope client construction (prevents accidental "poisoned" clients)
+ */
+function getLinearClient(): LinearClient {
+  const raw = process.env.LINEAR_API_KEY ?? "";
+  const apiKey = raw.trim();
 
-const apiKey = process.env.LINEAR_API_KEY;
-if (!apiKey) throw new Error("Missing LINEAR_API_KEY in .env");
+  if (!apiKey) {
+    throw new Error("Missing or empty LINEAR_API_KEY after trim (check your .env).");
+  }
 
-const client = new LinearClient({ apiKey });
+  return new LinearClient({ apiKey });
+}
 
 // tiny helper to read a boolean flag like --include-archived
 function hasFlag(name: string) {
@@ -31,6 +42,8 @@ function hasFlag(name: string) {
 }
 
 async function main() {
+  const client = getLinearClient();
+
   const includeArchived = hasFlag("include-archived");
 
   const me = await client.viewer;
@@ -51,20 +64,18 @@ async function main() {
       },
     });
 
-
     for (const issue of page.nodes) {
-  // If state is not pre-fetched, fetch it explicitly:
-	let stateName = "(No State)";
-	try {
-    		const state = await issue.state;
-    	if (state) stateName = state.name;
-  } 	catch {
-    	// ignore missing state relation
-  	}
-  	counts.set(stateName, (counts.get(stateName) ?? 0) + 1);
-  	total += 1;
-	}	 
-
+      // If state is not pre-fetched, fetch it explicitly:
+      let stateName = "(No State)";
+      try {
+        const state = await issue.state;
+        if (state) stateName = state.name;
+      } catch {
+        // ignore missing state relation
+      }
+      counts.set(stateName, (counts.get(stateName) ?? 0) + 1);
+      total += 1;
+    }
 
     cursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
   } while (cursor);
@@ -86,5 +97,4 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-
 

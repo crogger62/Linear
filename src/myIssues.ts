@@ -2,12 +2,12 @@
  * myIssues.ts
  * --------------
  * List all issues assigned to the authenticated user
- * 
+ *
  * Usage:
  *   npx ts-node src/myIssues.ts
  *   npm run my-issues
- * 
- *   Requires Linear API key in .env file
+ *
+ * Requires Linear API key in .env file
  */
 
 import dotenv from "dotenv";
@@ -18,13 +18,25 @@ import { LinearClient } from "@linear/sdk";
 dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
 // Uncomment next two lines if your Node version lacks global fetch
-//import fetch from "cross-fetch";
-//(globalThis as any).fetch ??= fetch;
+// import fetch from "cross-fetch";
+// (globalThis as any).fetch ??= fetch;
 
-const apiKey = process.env.LINEAR_API_KEY;
-if (!apiKey) throw new Error("Missing LINEAR_API_KEY in .env");
+/**
+ * Deterministic key handling:
+ * - trims whitespace / CRLF / trailing newlines
+ * - fails fast if missing/empty
+ * - avoids module-scope client construction (prevents accidental "poisoned" clients)
+ */
+function getLinearClient(): LinearClient {
+  const raw = process.env.LINEAR_API_KEY ?? "";
+  const apiKey = raw.trim();
 
-const client = new LinearClient({ apiKey });
+  if (!apiKey) {
+    throw new Error("Missing or empty LINEAR_API_KEY after trim (check your .env).");
+  }
+
+  return new LinearClient({ apiKey });
+}
 
 /**
  * Resolve relations returned by the SDK.
@@ -38,6 +50,8 @@ async function resolveRelation<T = any>(rel: any): Promise<T | null> {
 }
 
 async function main() {
+  const client = getLinearClient();
+
   const me = await client.viewer;
   console.log(`Viewer: ${me.name} <${me.email}> (id: ${me.id})\n`);
   console.log("Issues assigned to you:\n");
@@ -78,5 +92,3 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-
-
