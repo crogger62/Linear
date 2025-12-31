@@ -24,6 +24,15 @@ import path from "path";
 import { LinearClient, Issue, Project } from "@linear/sdk";
 import { spawn } from "node:child_process";
 
+// Debug flag - enable with --debug flag or DEBUG=true env var
+const DEBUG = process.env.DEBUG === "true" || process.argv.includes("--debug");
+
+function debugLog(...args: any[]) {
+  if (DEBUG) {
+    console.log("[DEBUG]", ...args);
+  }
+}
+
 /**
  * Deterministic key handling:
  * - trims whitespace / CRLF / trailing newlines
@@ -34,7 +43,10 @@ import { spawn } from "node:child_process";
  */
 function getLinearApiKey(): string {
   const raw = process.env.LINEAR_API_KEY ?? "";
+  debugLog("Raw LINEAR_API_KEY length:", raw.length);
+  debugLog("Raw LINEAR_API_KEY present:", !!raw);
   const apiKey = raw.trim();
+  debugLog("Trimmed API key length:", apiKey.length);
 
   if (!apiKey) {
     throw new Error("Missing or empty LINEAR_API_KEY after trim (check your .env).");
@@ -42,6 +54,7 @@ function getLinearApiKey(): string {
 
   // Normalize process.env so any spawned children inherit a clean value.
   process.env.LINEAR_API_KEY = apiKey;
+  debugLog("API key validated successfully");
   return apiKey;
 }
 
@@ -248,9 +261,67 @@ app.get("/api/insights", async (_req: Request, res: Response) => {
 // Health
 app.get("/", (_req, res) => res.send("Customer Requests picker server up"));
 
-app.listen(PORT, () => {
+// Catch unhandled promise rejections
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise);
+  console.error("Reason:", reason);
+  if (DEBUG) {
+    console.error("Stack:", reason instanceof Error ? reason.stack : String(reason));
+  }
+  // Don't exit - keep server running, but log the error
+});
+
+// Catch uncaught exceptions
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception:", error.message);
+  if (DEBUG) {
+    console.error("Stack:", error.stack);
+  }
+  // Exit on uncaught exceptions (they're usually fatal)
+  process.exit(1);
+});
+
+// Catch process signals to see if something is killing the process
+process.on("SIGTERM", () => {
+  debugLog("Received SIGTERM signal");
+  process.exit(0);
+});
+
+process.on("SIGINT", () => {
+  debugLog("Received SIGINT signal (Ctrl+C)");
+  process.exit(0);
+});
+
+process.on("exit", (code) => {
+  debugLog(`Process exiting with code: ${code}`);
+});
+
+const server = app.listen(PORT, () => {
   console.log(`Picker listening on http://localhost:${PORT}`);
   console.log(`Open http://localhost:${PORT}/picker.html`);
+  debugLog("Server started successfully, process PID:", process.pid);
+  debugLog("Node version:", process.version);
+  debugLog("Server should keep running - if it exits, check the logs above");
+  
+  // Keepalive: log every 5 seconds in debug mode to confirm process is alive
+  if (DEBUG) {
+    setInterval(() => {
+      debugLog("Server still running...", new Date().toISOString());
+    }, 5000);
+  }
+});
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`\n❌ Port ${PORT} is already in use.`);
+    console.error(`   Another instance of the server may already be running.`);
+    console.error(`   To find and stop it, run: lsof -ti :${PORT} | xargs kill`);
+    console.error(`   Or use a different port: PICKER_PORT=3101 npx ts-node src/customerRequests-server.ts\n`);
+    process.exit(1);
+  } else {
+    console.error("Server error:", err);
+    process.exit(1);
+  }
 });
 
 
