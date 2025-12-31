@@ -725,11 +725,11 @@ def main():
         "<html lang=\"en\">",
         "<head>",
         "  <meta charset=\"utf-8\" />",
-        "  <title>ACME Pain Points Summary</title>",
+        "  <title>Customer Pain Points Summary</title>",
     "  <style>body{font-family:Arial,Helvetica,sans-serif;margin:2rem;background:#f7f7f9;color:#1a1a1a;}h1{margin-bottom:0.5rem;}section{background:#fff;border-radius:8px;padding:1.25rem;margin-bottom:1.5rem;box-shadow:0 2px 6px rgba(0,0,0,0.06);}section h2{margin-top:0;color:#0f4c81;}section .meta{color:#555;font-size:0.9rem;margin-bottom:0.75rem;}section ul{margin:0 0 1rem 1.25rem;padding:0;}section li{margin-bottom:0.5rem;}section .title{font-weight:600;}section .summary{font-weight:600;} .blue{color:#0f4c81;} hr.sep{border:0;border-top:1px solid #dcdcdc;margin:1rem 0 1.25rem;} footer{margin-top:2rem;font-size:0.85rem;color:#555;}</style>",
         "</head>",
         "<body>",
-        "  <h1>Acme Pain Points Summary</h1>",
+        "  <h1>Customer Pain Points Summary</h1>",
         #f"  <div class=\"meta\">Vectorization: {escape(str(vec_mode))}; clusters: {k}</div>",
     ]
 
