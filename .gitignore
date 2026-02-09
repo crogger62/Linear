@@ -18,6 +18,7 @@ dist/
 *.xlsx
 ~$*.xlsx
 *.md
+!LES-164-test-plan.md
 # Office lock files
 ~$*.xlsx
 ~$*.docx
