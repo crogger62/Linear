@@ -1,0 +1,72 @@
+LES-155 Test Plan - Provide Enumeration of Issues
+
+Scope
+- Target feature: Linear workspace snapshot (enumerate open issues, group by project/state, active project counts, assignee load).
+- Code under test: src/workspaceSnapshot.ts and src/workspaceSnapshot-utils.ts.
+- Outputs: Markdown (default) and CSV formats, with optional Team column via --include-team.
+
+Test Strategy
+Focus on deterministic unit tests for business logic and integration tests for output assembly. Avoid live Linear API calls by using in-memory fixtures.
+
+Unit Test Scenarios
+Formatting utilities
+- csvEscape
+  - Returns empty string for null/undefined.
+  - Escapes quotes and wraps values containing commas/newlines.
+- escapeMd
+  - Escapes pipe characters for Markdown tables.
+
+Pagination and concurrency
+- paginate
+  - Aggregates nodes across multiple pages.
+  - Stops when hasNextPage is false.
+- mapLimit
+  - Enforces concurrency limit.
+  - Preserves original order of results.
+
+Aggregation logic
+- groupIssuesByProjectThenState
+  - Groups by project name and state name.
+  - Uses fallbacks (No Project) and (No State) when missing.
+- isActiveProject
+  - True for planned/started and not archived.
+  - False for archived or other states.
+- computeActiveProjects
+  - Filters to active projects only.
+  - Counts open issues per project and sorts by count desc then name.
+- computeAssigneeLoad
+  - Groups by assignee, uses (unassigned) for missing.
+  - Sorts by count desc then name.
+
+Integration Test Scenarios
+Output assembly
+- Build Markdown snapshot
+  - Includes generated timestamp and sections.
+  - Escapes pipes in titles.
+  - Includes Team column when --include-team is enabled.
+- Build CSV snapshot
+  - Includes correct headers (with/without Team column).
+  - Properly quoted fields containing commas.
+  - Contains all three sections: issues, active projects, assignee load.
+
+Edge Cases
+- No issues returned (empty tables / no rows).
+- Issues without projects, state names, or assignees.
+- Projects referenced by issues but missing from project lookup.
+- Multiple projects with same name but different IDs (ensure grouping by name remains consistent).
+
+Error Scenarios
+- Missing LINEAR_API_KEY (should fail fast with clear error).
+- Linear API errors or timeouts while fetching issues/projects.
+- Output write failures when --out is provided (filesystem errors).
+- Invalid --format values (should default to Markdown).
+
+Integration Points
+- Linear SDK: issues pagination, project lookup, related entities (state, assignee, team).
+- Filesystem writes for --out mode.
+- CLI flags and environment variables.
+
+Performance Considerations
+- Pagination for large workspaces (many issues/projects).
+- Concurrency guard in mapLimit to avoid API rate limits.
+- Memory usage when materializing large issue lists.
