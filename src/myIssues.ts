@@ -71,6 +71,7 @@ async function main() {
 
     for (const issue of page.nodes) {
       totalCount += 1;
+      const index = totalCount;
       const identifier = issue.identifier ?? "<no-id>";
       const title = issue.title ?? "<untitled>";
 
@@ -78,8 +79,8 @@ async function main() {
       const stateObj = await resolveRelation(issue.state);
       const state = stateObj?.name ?? "(No State)";
 
-      // Format: [identifier] title [state]
-      console.log(`${identifier} ${title} [${state}]`);
+      // Format: N. [identifier] title [state]
+      console.log(`${index}. ${identifier} ${title} [${state}]`);
     }
 
     cursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
