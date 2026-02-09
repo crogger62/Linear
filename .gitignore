@@ -18,6 +18,9 @@ dist/
 *.xlsx
 ~$*.xlsx
 *.md
+!README.md
+!test-plans/
+!test-plans/*.md
 # Office lock files
 ~$*.xlsx
 ~$*.docx
