@@ -1,0 +1,75 @@
+# Test Plan - LES-158 (LES-155: Provide enumeration of issues)
+
+## Overview
+Validate that the picker UI and /api/issues endpoint correctly enumerate
+Linear issues for selection, support search by identifier/title, respect
+limits, and handle errors gracefully.
+
+## Scope
+- Backend: GET /api/issues in src/customerRequests-server.ts
+- Frontend: issue list population and search in public/picker.html
+
+## Out of Scope
+- Running the export (/api/run) or analysis pipeline
+- Project enumeration (/api/projects)
+
+## Test Environment / Data
+- A Linear workspace with:
+  - At least 5 open issues
+  - At least 1 issue whose title has a distinctive keyword (for search)
+  - At least 1 issue with identifier in format TEAM-123
+  - (Optional) > 500 issues to validate page/limit behavior
+- .env contains valid LINEAR_API_KEY
+- Server running: npx ts-node src/customerRequests-server.ts
+- Browser access to http://localhost:3100/picker.html
+
+## Functional Test Cases
+
+### API: Enumeration and Filtering
+| ID | Scenario | Steps | Expected |
+|---|---|---|---|
+| API-01 | List issues with default limit | GET /api/issues | Returns JSON with issues array, items include id, identifier, title. Count <= 200 (default). |
+| API-02 | Explicit small limit | GET /api/issues?limit=1 | Returns at most 1 issue. |
+| API-03 | Max limit clamp | GET /api/issues?limit=999 | Returns at most 500 issues (clamped). |
+| API-04 | Min limit clamp | GET /api/issues?limit=0 | Returns at least 1 issue (clamped). |
+| API-05 | Identifier search (exact) | GET /api/issues?query=TEAM-123 | Returns matching issue if it exists; results use identifier filter (not title). |
+| API-06 | Identifier search (case) | GET /api/issues?query=team-123 | Returns same result as API-05 (team key is uppercased). |
+| API-07 | Identifier search (non-existent) | GET /api/issues?query=TEAM-99999 | Returns empty issues array. |
+| API-08 | Title search (substring) | GET /api/issues?query=<keyword> | Returns issues whose title contains keyword (case-insensitive). |
+| API-09 | Title search on identifier | GET /api/issues?query=TEAM | Returns issues whose title or identifier contain TEAM. |
+| API-10 | Query trimming | GET /api/issues?query=%20TEAM-123%20 | Leading/trailing spaces are trimmed; behaves like API-05. |
+
+### UI: Enumeration and Search
+| ID | Scenario | Steps | Expected |
+|---|---|---|---|
+| UI-01 | Initial issue list | Load picker.html | Issues list populates without manual input. |
+| UI-02 | Search by identifier | Type TEAM-123 into search box | Issues list updates to matching issue only. |
+| UI-03 | Search by title | Type a distinctive keyword | Issues list updates to matching issues. |
+| UI-04 | Clear search | Clear search input | Issues list repopulates with default set. |
+| UI-05 | No results | Search for a random string | List becomes empty without errors in console. |
+
+## Edge Cases
+- Issues with empty or null titles: ensure label still renders without breaking the list.
+- Very large workspaces: verify only recent issues are returned (current logic caps at 500).
+- Rapid typing in search box: repeated requests should not crash the UI.
+
+## Error Scenarios
+- Missing or invalid LINEAR_API_KEY:
+  - Server should fail on startup with a clear error.
+- Linear API failure (rate limit or network error):
+  - /api/issues returns HTTP 500 with { "error": "Failed to fetch issues" }.
+  - UI should not crash; it may show an empty list (manual verification).
+
+## Integration Points
+- Linear API via @linear/sdk for issue listing and filtering.
+- Frontend fetches /api/issues and expects the response shape:
+  { issues: [{ id, identifier, title }] }.
+
+## Performance Considerations
+- /api/issues should respond within an acceptable time:
+  - Target: < 2s for 200 issues; < 4s for 500 issues.
+- Repeated search requests should not exceed Linear API rate limits.
+
+## Regression Checklist
+- Ensure /api/issues responses remain compatible with picker UI.
+- Verify no changes break /api/projects or /api/run endpoints.
