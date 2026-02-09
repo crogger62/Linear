@@ -70,7 +70,8 @@ async function main() {
     });
 
     for (const issue of page.nodes) {
-      totalCount += 1;
+      const issueNumber = totalCount + 1;
+      totalCount = issueNumber;
       const identifier = issue.identifier ?? "<no-id>";
       const title = issue.title ?? "<untitled>";
 
@@ -79,7 +80,7 @@ async function main() {
       const state = stateObj?.name ?? "(No State)";
 
       // Format: [identifier] title [state]
-      console.log(`${identifier} ${title} [${state}]`);
+      console.log(`${issueNumber}. ${identifier} ${title} [${state}]`);
     }
 
     cursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
