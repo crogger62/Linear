@@ -1,0 +1,56 @@
+# Test Plan: LES-159 - Provide enumeration of issues
+
+## Scope
+- Enumerate issues from a Linear workspace using the CLI script.
+- Validate pagination, output formatting, and relation resolution (state, project, assignee).
+
+Primary implementation reference:
+- `src/listIssuesPaginated.ts`
+
+## Test environment / setup
+- Node.js 18+ (20+ preferred).
+- `LINEAR_API_KEY` set in `.env` with read access to issues.
+- Test workspace with:
+  - >50 issues to trigger pagination (ideally >100).
+  - Issues in multiple states (e.g., Backlog, In Progress, Done).
+  - Mix of assignees and at least one unassigned issue.
+  - Mix of issues with and without a project.
+  - (Optional) archived or canceled issues to verify inclusion.
+
+## Functional test cases
+
+| ID | Scenario | Steps | Expected |
+| --- | --- | --- | --- |
+| F1 | Basic enumeration | Run `npx ts-node src/listIssuesPaginated.ts`. | Output includes "Page 1 - N issues", a list of issues, and "Total issues listed: X". |
+| F2 | Pagination across pages | Ensure >50 issues. Run the script. | Output shows `Page 1`, `Page 2`, etc. Total equals sum of per-page counts. |
+| F3 | Relation resolution present | Identify an issue with state, project, and assignee. Run the script. | Issue line includes `[state]`, `project: <name>`, and `assignee: <name>`. |
+| F4 | Missing relations | Identify an issue missing project or assignee (or both). Run the script. | Missing fields are omitted; script does not crash. |
+| F5 | Title fallback | Identify an issue with missing title or unusual title (if possible). Run the script. | Title falls back to `identifier` or `<untitled>` per code path. |
+| F6 | Duplicate prevention (manual check) | Capture issue IDs from output across all pages. | No duplicate IDs across pages. |
+| F7 | Total count accuracy | Count total issue lines in output. | Count equals `Total issues listed: X`. |
+
+## Edge cases
+- **Empty workspace**: If no issues exist, script prints `Page 1 - 0 issues` and `Total issues listed: 0`.
+- **Large workspace**: >1000 issues; script completes without memory spikes or timeouts.
+- **Special characters**: Issue titles containing commas, unicode, or line breaks should not break output formatting.
+- **Archived/canceled issues**: Verify whether they appear (current script does not filter them out).
+
+## Error scenarios
+- **Missing API key**: Remove `LINEAR_API_KEY` and run the script. Expect a clear error and non-zero exit.
+- **Invalid API key / permissions**: Use a revoked or read-restricted key. Expect API error and non-zero exit.
+- **Network failure**: Simulate network loss. Expect request failure surfaced to stderr and non-zero exit.
+- **Rate limiting**: If workspace is large, API could rate limit. Expect an error surfaced and the process exits.
+
+## Integration points
+- Linear SDK (`@linear/sdk`) for issue fetching and relation resolution.
+- `.env` loading via `dotenv` and runtime environment configuration.
+- GraphQL pagination (cursor-based) via `client.issues`.
+
+## Performance considerations
+- With large issue counts, ensure runtime is acceptable and does not overwhelm Linear API limits.
+- Confirm pagination page size (50) balances request count and response size.
+- Track runtime for 1k+ issues to establish baseline (target: minutes, not tens of minutes).
+
+## Notes / assumptions
+- The enumeration script is intended for human-readable output, not for machine parsing.
+- Sorting is not enforced; output order is determined by API defaults.
