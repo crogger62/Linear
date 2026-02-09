@@ -78,8 +78,8 @@ async function main() {
       const stateObj = await resolveRelation(issue.state);
       const state = stateObj?.name ?? "(No State)";
 
-      // Format: [identifier] title [state]
-      console.log(`${identifier} ${title} [${state}]`);
+      // Format: {index}. [identifier] title [state]
+      console.log(`${totalCount}. ${identifier} ${title} [${state}]`);
     }
 
     cursor = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
