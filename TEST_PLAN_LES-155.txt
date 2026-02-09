@@ -1,0 +1,135 @@
+# Test plan: LES-155 - Provide enumeration of issues
+
+## Overview
+Validate the issue-enumeration flow that lists Linear issues via the
+TypeScript CLI and prints per-issue details with pagination and totals.
+
+Primary entrypoint:
+- src/listIssuesPaginated.ts (enumerates issues, paginates, prints totals)
+
+Related (if included in LES-155 scope):
+- src/issuesFiltered.ts (optional filters + counts by workflow state)
+
+## Scope
+- Enumerate all issues via Linear SDK with pagination
+- Render per-issue output (title/id, and optional state/project/assignee)
+- Correct total counts across pages
+- Basic CLI execution in ts-node
+
+## Out of scope
+- Creating, updating, or deleting issues
+- Customer request export/analyzer pipeline
+- UI picker server and SSE logs
+
+## Test environment / prerequisites
+- Node.js 18+ (20+ preferred)
+- LINEAR_API_KEY set in .env
+- Network access to Linear API
+- npm install completed
+
+## Test data
+- Workspace with > 50 issues to validate pagination
+- At least one issue with:
+  - state + project + assignee set
+  - no project and unassigned
+  - long title (> 120 chars)
+- (Optional) Archived issues if you want to confirm inclusion behavior
+
+## Functional test cases
+
+### F1: Basic enumeration (single page)
+Steps:
+1. Ensure workspace has <= 50 issues or use a small test workspace.
+2. Run: npx ts-node src/listIssuesPaginated.ts
+Expected:
+- Output starts with Page 1 — N issue(s)
+- Exactly N issue lines are printed
+- Final line: Total issues listed: N
+
+### F2: Pagination across multiple pages
+Steps:
+1. Use a workspace with > 50 issues.
+2. Run: npx ts-node src/listIssuesPaginated.ts
+Expected:
+- Output contains Page 1, Page 2, ... with non-zero counts
+- Sum of per-page counts equals Total issues listed
+- No duplicated issue IDs across pages
+
+### F3: Issue detail formatting (state/project/assignee present)
+Steps:
+1. Ensure at least one issue has state, project, and assignee set.
+2. Run the script and locate that issue in output.
+Expected:
+- Issue line includes [StateName]
+- Includes project: <project name>
+- Includes assignee: <assignee name>
+
+### F4: Missing relations are omitted cleanly
+Steps:
+1. Ensure at least one issue has no project and is unassigned.
+2. Run the script and locate that issue in output.
+Expected:
+- Issue line does not include project: or assignee: fragments
+- If state is missing, no [StateName] segment is shown
+
+### F5: Title fallback behavior
+Steps:
+1. Identify an issue with a standard title (normal case).
+2. Run the script and verify the line uses the title.
+Expected:
+- Output shows the issue title when present
+- If a title is missing (rare in Linear), fallback is identifier or <untitled>
+
+### F6: Pluralization and output stability
+Steps:
+1. Run with a single-issue workspace (or filtered test workspace).
+Expected:
+- Header uses 1 issue (not 1 issues)
+- Output formatting remains stable (no extra separators or blank lines)
+
+## Edge cases
+- E1: No issues returned
+  - Workspace with zero issues (or a test org with none).
+  - Expect Page 1 — 0 issues and Total issues listed: 0.
+- E2: Very long titles
+  - Output remains on one line; no truncation errors or crashes.
+- E3: Null/invalid relations
+  - If state/assignee/project is null or inaccessible, script still completes.
+- E4: Large workspace
+  - Script completes without memory issues; time remains reasonable.
+
+## Error scenarios
+- ER1: Missing LINEAR_API_KEY
+  - Unset the env var and run script.
+  - Expect: Missing LINEAR_API_KEY in .env error.
+- ER2: Invalid/expired API key
+  - Use an invalid key.
+  - Expect: authentication error from Linear SDK.
+- ER3: Network failure
+  - Block network or simulate DNS failure.
+  - Expect: network error surfaced and non-zero exit.
+- ER4: Rate limiting
+  - Hit API rate limits with repeated runs.
+  - Expect: error surfaced (retry policy not required, but error should be clear).
+- ER5: Missing global fetch
+  - Run on Node without global fetch.
+  - Expect: fetch error; verify polyfill instructions resolve it.
+
+## Integration points
+- Linear SDK (@linear/sdk) issues connection and relations:
+  - issues({ first, after })
+  - issue.state, issue.assignee, issue.project
+- .env + dotenv/config loading for LINEAR_API_KEY
+- Node runtime and network access
+
+## Performance considerations
+- For large issue counts, the script performs per-issue relation fetches.
+  - Track total runtime for 1k+ issues (target: completes within a few minutes).
+  - Monitor API rate limit headers or errors.
+- Output size grows linearly with issue count; verify console remains responsive.
+
+## Optional coverage if LES-155 includes filters
+If LES-155 requires filtered enumeration (see src/issuesFiltered.ts):
+- Validate each filter: --email, --label, --state, --since, --include-archived
+- Confirm counts and totals align with expected subsets
+- Verify case-insensitive matching for labels/states
