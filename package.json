@@ -10,18 +10,22 @@
     "dev": "ts-node src/customerRequests-server.ts",
     "export": "ts-node src/customerRequests.ts",
     "analyze": "bash -lc ./run_analysis.sh",
-    "start:dist": "node dist/customerRequests-server.js"
+    "start:dist": "node dist/customerRequests-server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
+    "@linear/sdk": "^31.0.0",
     "body-parser": "^2.2.0",
-    "express": "^5.1.0",
     "dotenv": "^16.4.5",
-    "@linear/sdk": "^31.0.0"
+    "express": "^5.1.0"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.6",
     "@types/express": "^5.0.3",
+    "@types/node": "^25.2.3",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   }
 }
