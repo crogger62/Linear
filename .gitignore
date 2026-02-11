@@ -18,6 +18,8 @@ dist/
 *.xlsx
 ~$*.xlsx
 *.md
+# allow specific test plan docs
+!docs/test-plan-LES-155.md
 # Office lock files
 ~$*.xlsx
 ~$*.docx
