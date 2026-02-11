@@ -31,7 +31,7 @@ const INCLUDE_TEAM = hasFlag("--include-team");
 
 /* --------------------------------- Types ---------------------------------- */
 
-type IssueLite = {
+export type IssueLite = {
   id: string;
   identifier: string;
   title: string;
@@ -44,27 +44,44 @@ type IssueLite = {
   assigneeName?: string | null;
 };
 
+export type ActiveProjectRow = {
+  projectName: string;
+  projectId: string;
+  state: string;
+  openCount: number;
+};
+
+export type AssigneeLoadRow = {
+  name: string;
+  count: number;
+};
+
+export type SnapshotRenderOptions = {
+  includeTeam?: boolean;
+  generatedAt?: string;
+};
+
 /* -------------------------------- Helpers --------------------------------- */
 
 // Simple CSV escape (quotes, commas, newlines)
-function csvEscape(s: string | null | undefined): string {
+export function csvEscape(s: string | null | undefined): string {
   if (s == null) return "";
   const v = String(s).replace(/"/g, '""');
   return /[",\n\r]/.test(v) ? `"${v}"` : v;
 }
 
 // Simple markdown escape (only pipes, for tables)
-function escapeMd(s: string | null | undefined): string {
+export function escapeMd(s: string | null | undefined): string {
   return (s ?? "").replace(/\|/g, "\\|");
 }
 
-function nowISO(): string {  // YYYY-MM-DDTHH:mm:ss.sssZ
+export function nowISO(): string {  // YYYY-MM-DDTHH:mm:ss.sssZ
   return new Date().toISOString();
 }
 
 /** Generic paginator for Linear SDK connections */
 // helpful for iterating 
-async function paginate<T>(
+export async function paginate<T>(
   fetch: (after?: string | null) => Promise<{
     nodes: T[];
     pageInfo: { hasNextPage: boolean; endCursor?: string | null };
@@ -85,7 +102,7 @@ async function paginate<T>(
 /** Concurrency-limited mapper (safer than blasting all awaits at once) */
 // From: https://stackoverflow.com/a/72205185/62937
 // helps throttles API usage: it runs at most N concurrent tasks (limit), starting a new one only after another finishes.
-async function mapLimit<T, R>(
+export async function mapLimit<T, R>(
   items: T[],
   limit: number,
   worker: (item: T, idx: number) => Promise<R>
@@ -119,7 +136,7 @@ async function mapLimit<T, R>(
  *   completedAt == null, canceledAt == null, archivedAt == null (filtered after fetch)
  * Then update related fields (state, project, team, assignee) with capped concurrency.
  */
-async function fetchOpenIssues(client: LinearClient): Promise<IssueLite[]> {
+export async function fetchOpenIssues(client: LinearClient): Promise<IssueLite[]> {
   const rawIssues = await paginate<Issue>((after) =>
     client.issues({
       first: 50,
@@ -170,7 +187,7 @@ async function fetchOpenIssues(client: LinearClient): Promise<IssueLite[]> {
 }
 
 /** Fetch a map of projectId -> Project for the referenced set of IDs */
-async function fetchProjectsById(client: LinearClient, projectIds: string[]): Promise<Record<string, Project>> {
+export async function fetchProjectsById(client: LinearClient, projectIds: string[]): Promise<Record<string, Project>> {
   const uniq = Array.from(new Set(projectIds.filter(Boolean)));
   const out: Record<string, Project> = {};
   await Promise.all(
@@ -192,7 +209,7 @@ function isActiveProject(p?: Project | null): boolean {
 
 /* ------------------------------- Aggregation ------------------------------ */
 
-function groupIssuesByProjectThenState(issues: IssueLite[]) {
+export function groupIssuesByProjectThenState(issues: IssueLite[]) {
   const grouped = new Map<string, Map<string, IssueLite[]>>();
   for (const iss of issues) {
     const proj = iss.projectName ?? "(No Project)";
@@ -206,8 +223,8 @@ function groupIssuesByProjectThenState(issues: IssueLite[]) {
   return grouped;
 }
 
-function computeActiveProjects(issues: IssueLite[], projects: Record<string, Project>) {
-  const rows: Array<{ projectName: string; projectId: string; state: string; openCount: number }> = [];
+export function computeActiveProjects(issues: IssueLite[], projects: Record<string, Project>): ActiveProjectRow[] {
+  const rows: ActiveProjectRow[] = [];
   const referenced = Array.from(new Set(issues.map((i) => i.projectId).filter(Boolean)) as Set<string>);
   for (const pid of referenced) {
     const p = projects[pid!];
@@ -224,8 +241,8 @@ function computeActiveProjects(issues: IssueLite[], projects: Record<string, Pro
   return rows;
 }
 
-function computeAssigneeLoad(issues: IssueLite[]) {
-  const by = new Map<string, { name: string; count: number }>();
+export function computeAssigneeLoad(issues: IssueLite[]): AssigneeLoadRow[] {
+  const by = new Map<string, AssigneeLoadRow>();
   for (const iss of issues) {
     const key = iss.assigneeId ?? "(unassigned)";
     const nm = iss.assigneeName ?? "(unassigned)";
@@ -249,12 +266,14 @@ async function writeOut(content: string, ext: "md" | "csv") {
   console.error(`Wrote ${file} (${Buffer.byteLength(content, "utf8")} bytes)`);
 }
 
-async function renderMarkdown(
+export function buildMarkdown(
   byProjectThenState: Map<string, Map<string, IssueLite[]>>,
-  activeProjects: Array<{ projectName: string; projectId: string; state: string; openCount: number }>,
-  assigneeLoad: Array<{ name: string; count: number }>
+  activeProjects: ActiveProjectRow[],
+  assigneeLoad: AssigneeLoadRow[],
+  options: SnapshotRenderOptions = {}
 ) {
-  const ts = nowISO();
+  const includeTeam = options.includeTeam ?? false;
+  const ts = options.generatedAt ?? nowISO();
   const lines: string[] = [];
   lines.push(`# Linear Workspace Snapshot`);
   lines.push(`_Generated: ${ts}_\n`);
@@ -264,12 +283,12 @@ async function renderMarkdown(
     lines.push(`\n### ${escapeMd(projectName)}`);
     for (const [stateName, items] of byState) {
       lines.push(`\n**${escapeMd(stateName)}** (${items.length})`);
-      lines.push(`\n| Identifier | Title | Assignee${INCLUDE_TEAM ? " | Team" : ""} |`);
-      lines.push(`|---|---|---${INCLUDE_TEAM ? "|---" : ""}|`);
+      lines.push(`\n| Identifier | Title | Assignee${includeTeam ? " | Team" : ""} |`);
+      lines.push(`|---|---|---${includeTeam ? "|---" : ""}|`);
       for (const it of items) {
         lines.push(
           `| ${escapeMd(it.identifier)} | ${escapeMd(it.title)} | ${escapeMd(it.assigneeName ?? "(unassigned)")}${
-            INCLUDE_TEAM ? ` | ${escapeMd(it.teamName ?? "")}` : ""
+            includeTeam ? ` | ${escapeMd(it.teamName ?? "")}` : ""
           } |`
         );
       }
@@ -290,16 +309,27 @@ async function renderMarkdown(
     lines.push(`| ${escapeMd(a.name)} | ${a.count} |`);
   }
 
-  await writeOut(lines.join("\n"), "md");
+  return lines.join("\n");
 }
 
-async function renderCsv(
+async function renderMarkdown(
   byProjectThenState: Map<string, Map<string, IssueLite[]>>,
-  activeProjects: Array<{ projectName: string; projectId: string; state: string; openCount: number }>,
-  assigneeLoad: Array<{ name: string; count: number }>
+  activeProjects: ActiveProjectRow[],
+  assigneeLoad: AssigneeLoadRow[]
 ) {
+  const content = buildMarkdown(byProjectThenState, activeProjects, assigneeLoad, { includeTeam: INCLUDE_TEAM });
+  await writeOut(content, "md");
+}
+
+export function buildCsv(
+  byProjectThenState: Map<string, Map<string, IssueLite[]>>,
+  activeProjects: ActiveProjectRow[],
+  assigneeLoad: AssigneeLoadRow[],
+  options: SnapshotRenderOptions = {}
+) {
+  const includeTeam = options.includeTeam ?? false;
   const parts: string[] = [];
-  parts.push("section,project,state,identifier,title,assignee" + (INCLUDE_TEAM ? ",team" : ""));
+  parts.push("section,project,state,identifier,title,assignee" + (includeTeam ? ",team" : ""));
   for (const [projectName, byState] of byProjectThenState) {
     for (const [stateName, items] of byState) {
       for (const it of items) {
@@ -311,7 +341,7 @@ async function renderCsv(
             csvEscape(it.identifier),
             csvEscape(it.title),
             csvEscape(it.assigneeName ?? "(unassigned)"),
-            ...(INCLUDE_TEAM ? [csvEscape(it.teamName ?? "")] : []),
+            ...(includeTeam ? [csvEscape(it.teamName ?? "")] : []),
           ].join(",")
         );
       }
@@ -328,12 +358,21 @@ async function renderCsv(
     parts.push(["assignee_load", csvEscape(a.name), String(a.count)].join(","));
   }
 
-  await writeOut(parts.join("\n"), "csv");
+  return parts.join("\n");
+}
+
+async function renderCsv(
+  byProjectThenState: Map<string, Map<string, IssueLite[]>>,
+  activeProjects: ActiveProjectRow[],
+  assigneeLoad: AssigneeLoadRow[]
+) {
+  const content = buildCsv(byProjectThenState, activeProjects, assigneeLoad, { includeTeam: INCLUDE_TEAM });
+  await writeOut(content, "csv");
 }
 
 /* ---------------------------------- Main ---------------------------------- */
 
-(async () => {
+export async function main() {
   const apiKey = process.env.LINEAR_API_KEY;
   if (!apiKey) {
     console.error("Missing LINEAR_API_KEY in environment (.env).");
@@ -354,7 +393,11 @@ async function renderCsv(
   } else {
     await renderMarkdown(grouped, activeProjects, assigneeLoad);
   }
-})().catch((err) => {
-  console.error("Snapshot failed:", err && (err.stack || err));
-  process.exit(1);
-});
+}
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("Snapshot failed:", err && (err.stack || err));
+    process.exit(1);
+  });
+}
