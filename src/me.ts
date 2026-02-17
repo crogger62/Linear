@@ -11,20 +11,7 @@
  *
  */
 
-
-import "dotenv/config";
-import { LinearClient } from "@linear/sdk";
-
-function getLinearClient() {
-  const raw = process.env.LINEAR_API_KEY ?? "";
-  const apiKey = raw.trim();  // normalize
-
-  if (!apiKey) {
-    throw new Error("Missing or empty LINEAR_API_KEY after trim");
-  }
-
-  return new LinearClient({ apiKey });
-}
+import { getLinearClient } from "./linearClient";
 
 async function main() {
   const client = getLinearClient(); // construct AFTER validation
@@ -37,6 +24,5 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
-
 
 

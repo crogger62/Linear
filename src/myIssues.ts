@@ -10,33 +10,12 @@
  * Requires Linear API key in .env file
  */
 
-import dotenv from "dotenv";
-import path from "path";
-import { LinearClient } from "@linear/sdk";
-
-// Load .env from project root (one level up from src/)
-dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
+import { getLinearClient } from "./linearClient";
 
 // Uncomment next two lines if your Node version lacks global fetch
 // import fetch from "cross-fetch";
 // (globalThis as any).fetch ??= fetch;
 
-/**
- * Deterministic key handling:
- * - trims whitespace / CRLF / trailing newlines
- * - fails fast if missing/empty
- * - avoids module-scope client construction (prevents accidental "poisoned" clients)
- */
-function getLinearClient(): LinearClient {
-  const raw = process.env.LINEAR_API_KEY ?? "";
-  const apiKey = raw.trim();
-
-  if (!apiKey) {
-    throw new Error("Missing or empty LINEAR_API_KEY after trim (check your .env).");
-  }
-
-  return new LinearClient({ apiKey });
-}
 
 /**
  * Resolve relations returned by the SDK.
